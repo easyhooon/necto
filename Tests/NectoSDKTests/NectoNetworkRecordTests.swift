@@ -42,5 +42,20 @@ struct NectoNetworkRecordTests {
 
         #expect(NectoNetworkRecord.Body(data: bytes, contentType: "text/plain").text == nil)
         #expect(NectoNetworkRecord.Body(data: Data([0xFF, 0xFE]), contentType: nil).text == nil)
+        // Whole, and still ending inside a character: nothing was cut, so it is not text.
+        #expect(NectoNetworkRecord.Body(data: Data([0x61, 0xED, 0x95]), contentType: "text/plain").text == nil)
+    }
+
+    @Test("reads a cut head wherever its bytes start and however few there are")
+    func readsShortAndSlicedHeads() {
+        #expect(String(utf8Head: Data()) == "")
+        #expect(String(utf8Head: Data([0xED])) == "")
+        #expect(String(utf8Head: Data([0xF0, 0x9F, 0x99])) == "")
+        #expect(String(utf8Head: Data([0x61, 0xF0, 0x9F])) == "a")
+        // A complete character followed by a byte that continues nothing.
+        #expect(String(utf8Head: Data([0xC3, 0xA9, 0xA9])) == nil)
+
+        let sliced = Data([0xFF, 0xFF, 0x61, 0xED, 0x95]).dropFirst(2)
+        #expect(String(utf8Head: sliced) == "a")
     }
 }

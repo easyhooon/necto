@@ -45,9 +45,15 @@ public struct NectoNetworkRecord: Sendable, Hashable, Codable, Identifiable {
             self.contentType = contentType
 
             let capped = data.prefix(Self.captureLimit)
-            isTruncated = data.count > Self.captureLimit
-            // The cap counts bytes, so it can fall inside a character.
-            text = Self.looksTextual(contentType) ? String(utf8Head: capped) : nil
+            let isCut = data.count > Self.captureLimit
+            isTruncated = isCut
+            guard Self.looksTextual(contentType) else {
+                text = nil
+                return
+            }
+            // The cap counts bytes, so it can fall inside a character. A body that
+            // was not cut and still ends inside one is not text.
+            text = isCut ? String(utf8Head: capped) : String(data: capped, encoding: .utf8)
         }
 
         private static func looksTextual(_ contentType: String?) -> Bool {
