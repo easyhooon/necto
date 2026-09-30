@@ -148,11 +148,14 @@ public final class NectoFilesPlugin: NectoPlugin, @unchecked Sendable {
             let handle = try FileHandle(forReadingFrom: file)
             defer { try? handle.close() }
             let head = try handle.read(upToCount: Self.previewLimit) ?? Data()
+            let isTruncated = (values.fileSize ?? 0) > head.count
 
-            if let text = String(data: head, encoding: .utf8) {
+            // Only a head that was cut may end part way through a character. A whole
+            // file that does is not text, and must not be opened for editing as if it were.
+            if let text = isTruncated ? String(utf8Head: head) : String(data: head, encoding: .utf8) {
                 fields["kind"] = .string("text")
                 fields["text"] = .string(text)
-                fields["isTruncated"] = .bool((values.fileSize ?? 0) > head.count)
+                fields["isTruncated"] = .bool(isTruncated)
             } else {
                 // Not UTF-8 is as far as this guesses. Rendering base64 would say nothing.
                 fields["kind"] = .string("binary")

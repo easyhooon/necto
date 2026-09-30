@@ -46,7 +46,8 @@ public struct NectoNetworkRecord: Sendable, Hashable, Codable, Identifiable {
 
             let capped = data.prefix(Self.captureLimit)
             isTruncated = data.count > Self.captureLimit
-            text = Self.looksTextual(contentType) ? String(data: capped, encoding: .utf8) : nil
+            // The cap counts bytes, so it can fall inside a character.
+            text = Self.looksTextual(contentType) ? String(utf8Head: capped) : nil
         }
 
         private static func looksTextual(_ contentType: String?) -> Bool {
