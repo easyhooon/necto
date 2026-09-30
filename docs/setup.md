@@ -102,3 +102,33 @@ Start with `URLSessionNetworkPlugin` and `NectoEventsPlugin`. Network requests a
 as they happen. Keep the registered `events` instance in your app's debug logging code
 and call `events.report(...)` to send log entries, as in the example above. Guard these
 calls with `#if DEBUG` too. Add other plugins for the data you need to inspect.
+
+### Which requests are captured
+
+Registering `URLSessionNetworkPlugin` captures `URLSession.shared`. A session your app
+builds from a `URLSessionConfiguration` takes its protocols from that configuration,
+`.default` included, so its requests appear only once the capture is added to it. That
+includes networking libraries that create a session of their own:
+
+```swift
+let configuration = URLSessionConfiguration.default
+#if DEBUG
+configuration.protocolClasses = [NectoURLSessionCapture.protocolClass]
+    + (configuration.protocolClasses ?? [])
+#endif
+let session = URLSession(configuration: configuration)
+```
+
+A captured request is re-issued through a session of Necto's own, and its response is
+handed back as it arrives. What that changes for a session you add the capture to:
+
+- **Cookies and credentials** come from the shared stores, and a cookie a response sets
+  is stored there. A session configured with stores of its own does not have them
+  consulted, so do not capture one that has to keep its cookies apart from the rest of
+  the app, such as an ephemeral or per-account session.
+- **Caching** is off: a captured request always loads.
+- **Redirects** are followed without asking your session's delegate, so a delegate
+  that refuses a redirect or changes the redirected request has no effect.
+- **Authentication challenges** are not passed to your delegate. A server certificate it
+  would accept or pin, and credentials it would supply, do not apply to a captured
+  request, so a development server with a self-signed certificate fails.

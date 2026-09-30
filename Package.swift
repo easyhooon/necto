@@ -55,6 +55,10 @@ let package = Package(
             dependencies: ["NectoSDK", "NectoDefaultPlugins", "NectoProcessMetrics", "NectoTransport", "NectoModel"]
         ),
         .testTarget(
+            name: "NectoURLSessionCaptureTests",
+            dependencies: ["NectoURLSessionCapture", "NectoDefaultPlugins", "NectoModel"]
+        ),
+        .testTarget(
             name: "NectoProcessMetricsTests",
             dependencies: ["NectoProcessMetrics", "NectoDefaultPlugins", "NectoSDK", "NectoModel"]
         ),
