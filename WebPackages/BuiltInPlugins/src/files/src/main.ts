@@ -298,11 +298,16 @@ function detailBody(): Node[] {
 // -- actions -----------------------------------------------------------------
 
 async function loadDirectory(path: string): Promise<void> {
+  const root = rootID;
   try {
-    const output = await necto.device.send<{ entries: Entry[] }>("files.list", { root: rootID, path });
+    const output = await necto.device.send<{ entries: Entry[] }>("files.list", { root, path });
+    // Listings are kept by path alone, so one that comes back after the root was
+    // switched would show the old root's files as the new one's.
+    if (rootID !== root) return;
     loaded.set(path, output.entries);
     message = null;
   } catch (error) {
+    if (rootID !== root) return;
     loaded.set(path, []);
     message = messageOf(error);
   }
