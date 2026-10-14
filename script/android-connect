@@ -51,10 +51,6 @@ def main():
     env = dict(os.environ, CFFIXED_USER_HOME=str(home), NECTO_ANDROID_SERIAL=args.serial,
                NECTO_ANDROID_SOCKET=str(socket_path), NECTO_ANDROID_APP=args.application_id,
                NECTO_ANDROID_ONLY="1")
-    env.pop("NECTO_ANDROID_PORT", None)
-    if os.environ.get("NECTO_POC_INJECTOR"):
-        env.update(DYLD_INSERT_LIBRARIES=os.environ["NECTO_POC_INJECTOR"],
-                   LOUPE_PORT="28749", LOUPE_BIND_HOST="127.0.0.1")
     host = None
     stopping = False
 

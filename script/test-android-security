@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise malformed clients against the running local Android sample only."""
+"""Exercise malformed clients against the Android sample that script/android-sample runs."""
 import json
 import os
 from pathlib import Path
@@ -10,9 +10,9 @@ import subprocess
 import time
 
 root = Path(__file__).resolve().parent.parent
-out = root / "Build/AndroidPOC"
+out = root / "Build/Android"
 run = json.loads((out / "current-run.json").read_text())
-assert run["applicationID"] == "dev.necto.sample"
+assert run["applicationID"] == "im.toss.necto.sample"
 results = {}
 
 
@@ -49,7 +49,7 @@ def connect(handshake=True):
         client.settimeout(12)
         try:
             client.connect(run["socketPath"])
-            assert receive(client)["appBundleID"] == "dev.necto.sample"
+            assert receive(client)["appBundleID"] == "im.toss.necto.sample"
             if handshake:
                 send(client, {"accepted": True, "hostProtocolVersion": 1})
                 assert receive(client)["type"] == "plugin.register"
@@ -76,9 +76,9 @@ def invoke(client, request_id, operation, kind="once"):
     }})
 
 
-expected_host = root / "Build/AndroidPOC/Products/Debug/Necto.app/Contents/MacOS/Necto"
+expected_host = out / "Products/Debug/Necto.app/Contents/MacOS/Necto"
 command = subprocess.check_output(["ps", "-p", str(run["pid"]), "-o", "command="], text=True).strip()
-assert command == str(expected_host), "The recorded POC host is no longer running"
+assert command == str(expected_host), "The recorded host is no longer running"
 def terminate(signum, _frame):
     raise SystemExit(128 + signum)
 
@@ -86,8 +86,8 @@ def terminate(signum, _frame):
 signal.signal(signal.SIGTERM, terminate)
 os.kill(run["pid"], signal.SIGSTOP)
 try:
-    adb("shell", "am", "force-stop", "dev.necto.sample")
-    adb("shell", "am", "start", "-W", "-n", "dev.necto.sample/.MainActivity")
+    adb("shell", "am", "force-stop", "im.toss.necto.sample")
+    adb("shell", "am", "start", "-W", "-n", "im.toss.necto.sample/.MainActivity")
     with connect(handshake=False) as client:
         start = time.monotonic()
         closed(client)
@@ -124,7 +124,9 @@ try:
 
     with connect() as client:
         invoke(client, "recovered", "events.list")
-        reply = receive(client)
+        # Every plugin registers on its own, so the answer follows the remaining ones.
+        while (reply := receive(client))["type"] != "plugin.result":
+            assert reply["type"] == "plugin.register"
         assert reply["payload"]["requestID"] == "recovered"
         assert "events" in reply["payload"]["output"]
         results["recoversWithoutAppRestart"] = True
