@@ -30,7 +30,7 @@ WebBridge/dist/
 **/.vitepress/cache/
 
 # Local Android builds and SDK configuration.
-Android/.gradle/
-Android/.kotlin/
-Android/**/build/
-Android/local.properties
+SDK/Android/**/.gradle/
+SDK/Android/**/.kotlin/
+SDK/Android/**/build/
+SDK/Android/local.properties
