@@ -66,7 +66,11 @@ public enum NectoURLSessionCapture {
     }
 
     /// For apps that build their own `URLSessionConfiguration`.
-    public static var protocolClass: AnyClass { NectoNetworkObserver.self }
+    ///
+    /// What that configuration says about cookies cannot be seen from the capture,
+    /// so no cookie is sent or stored for the requests it captures, whatever the
+    /// configuration's own policy is.
+    public static var protocolClass: AnyClass { NectoConfiguredNetworkObserver.self }
 }
 
 /// Observes URLSession traffic without the app having to report anything.
@@ -79,16 +83,16 @@ public enum NectoURLSessionCapture {
 /// handed back as it arrives — the response first, then its data piece by piece — so
 /// a stream stays a stream and a delegate is told things in the order it expects.
 ///
-/// The re-issued request runs in a session of Necto's own, built from the default
-/// configuration. It uses the shared cookie and credential stores, as `URLSession.shared`
-/// and default configurations do: a cookie a response sets is stored there and sent
-/// from there. A session the app gave stores of its own does not have them consulted,
-/// so one that has to keep its cookies apart should not be captured.
+/// The re-issued request runs in a session of Necto's own. This class is the one
+/// registered with the loading system, which reaches `URLSession.shared` and nothing
+/// else, so its session is built from the default configuration and handles cookies
+/// through the shared store exactly as the shared session does. A session the app
+/// configured itself goes through `NectoConfiguredNetworkObserver` instead.
 ///
 /// A redirect is followed here, and the app is handed where it led. Its session's
 /// delegate is not asked: a `URLProtocol` can pass a redirect on, but is never told
 /// what the delegate answered, and a load that guesses goes wrong one way or the other.
-final class NectoNetworkObserver: URLProtocol, @unchecked Sendable {
+class NectoNetworkObserver: URLProtocol, @unchecked Sendable {
     /// Marks a request that this protocol already handled, so re-issuing it does not
     /// recurse back into the observer.
     private static let handledKey = "NectoNetworkObserverHandled"
@@ -113,18 +117,20 @@ final class NectoNetworkObserver: URLProtocol, @unchecked Sendable {
     /// task. A completion handler would only hear about a response once it is over.
     private final class Loader: NSObject, URLSessionDataDelegate, @unchecked Sendable {
         private let lock = NSLock()
-        private var observers: [Int: NectoNetworkObserver] = [:]
+        // Keyed by the task itself: a task identifier is unique within one session,
+        // and this delegate serves more than one.
+        private var observers: [ObjectIdentifier: NectoNetworkObserver] = [:]
 
         func add(_ observer: NectoNetworkObserver, for task: URLSessionTask) {
-            lock.withLock { observers[task.taskIdentifier] = observer }
+            lock.withLock { observers[ObjectIdentifier(task)] = observer }
         }
 
         func remove(_ task: URLSessionTask) {
-            lock.withLock { _ = observers.removeValue(forKey: task.taskIdentifier) }
+            lock.withLock { _ = observers.removeValue(forKey: ObjectIdentifier(task)) }
         }
 
         private func observer(for task: URLSessionTask) -> NectoNetworkObserver? {
-            lock.withLock { observers[task.taskIdentifier] }
+            lock.withLock { observers[ObjectIdentifier(task)] }
         }
 
         func urlSession(
@@ -151,20 +157,33 @@ final class NectoNetworkObserver: URLProtocol, @unchecked Sendable {
     private static let reporter = Reporter()
     private static let loader = Loader()
 
-    /// One session for every re-issued request, so connections are reused the way the
-    /// app's own session would reuse them. It lives as long as the process does.
-    private static let session: URLSession = {
+    /// The session that re-issues requests reaching this class. One for all of them,
+    /// so connections are reused the way the app's own session would reuse them.
+    class var loadingSession: URLSession { sharedSession }
+
+    /// For requests from `URLSession.shared`, whose cookie policy is known.
+    private static let sharedSession = makeSession(handlesCookies: true)
+
+    /// For requests from a configuration of the app's own, whose cookie policy is not.
+    fileprivate static let cookielessSession = makeSession(handlesCookies: false)
+
+    /// A session that lives as long as the process does.
+    private static func makeSession(handlesCookies: Bool) -> URLSession {
         let configuration = URLSessionConfiguration.default
-        // Without this protocol, or the re-issued request would be intercepted again.
-        configuration.protocolClasses = configuration.protocolClasses?.filter { $0 != NectoNetworkObserver.self }
+        // Without these protocols, or the re-issued request would be intercepted again.
+        configuration.protocolClasses = configuration.protocolClasses?.filter { $0 is NectoNetworkObserver.Type == false }
         // Whether a response may be cached is for the app's session to say, and its
         // cache cannot be seen from here, so a captured request always loads.
         configuration.urlCache = nil
+        if !handlesCookies {
+            configuration.httpShouldSetCookies = false
+            configuration.httpCookieStorage = nil
+        }
         // Every captured session shares this one, so its limit per host would count
         // across all of them, and a few long-lived streams would hold the rest back.
         configuration.httpMaximumConnectionsPerHost = 64
         return URLSession(configuration: configuration, delegate: loader, delegateQueue: nil)
-    }()
+    }
 
     /// Guards everything below: the loading system and the session call in from
     /// different threads.
@@ -210,7 +229,7 @@ final class NectoNetworkObserver: URLProtocol, @unchecked Sendable {
         }
         URLProtocol.setProperty(true, forKey: Self.handledKey, in: mutable)
 
-        let task = Self.session.dataTask(with: mutable as URLRequest)
+        let task = Self.loadingSession.dataTask(with: mutable as URLRequest)
         lock.withLock {
             startedAt = Date()
             observedTask = task
@@ -344,4 +363,14 @@ final class NectoNetworkObserver: URLProtocol, @unchecked Sendable {
         }
         return data.isEmpty ? nil : data
     }
+}
+
+/// The protocol an app puts into a configuration of its own.
+///
+/// What that configuration says about cookies — whether it sets them at all, and into
+/// which store — cannot be seen from a `URLProtocol`, and sending the shared store's
+/// cookies for a session that turned them off would be a policy of Necto's imposed on
+/// the app's. So no cookie is sent or stored for these requests, as before.
+final class NectoConfiguredNetworkObserver: NectoNetworkObserver, @unchecked Sendable {
+    override class var loadingSession: URLSession { cookielessSession }
 }

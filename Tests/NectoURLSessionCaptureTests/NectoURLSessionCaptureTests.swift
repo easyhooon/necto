@@ -143,31 +143,92 @@ struct NectoURLSessionCaptureTests {
         #expect(record.requestBody?.byteCount == 16)
     }
 
-    @Test("leaves the app's cookies working", arguments: [false, true])
-    func keepsCookies(captured: Bool) async throws {
-        let server = try LocalHTTPServer { request, response in
+    /// A server that logs a session in with a cookie and echoes what comes back.
+    private static func loginServer() throws -> LocalHTTPServer {
+        try LocalHTTPServer { request, response in
             if request.path == "/login" {
                 response.send(headers: ["Set-Cookie": "session=necto; Path=/"])
             } else {
                 Self.echo(request, response)
             }
         }
+    }
+
+    /// Removes what a test left in the shared cookie store, before and after.
+    private func forgettingSharedCookies(for server: LocalHTTPServer, _ body: () async throws -> Void) async throws {
+        let storage = HTTPCookieStorage.shared
+        let forget = { storage.cookies(for: server.baseURL)?.forEach(storage.deleteCookie) }
+        forget()
+        defer { forget() }
+        try await body()
+    }
+
+    @Test("keeps the shared session's cookies working", arguments: [false, true])
+    func keepsSharedSessionCookies(captured: Bool) async throws {
+        let server = try Self.loginServer()
+        defer { server.stop() }
+        let records = Records()
+        if captured { NectoURLSessionCapture.install(reporting: records) }
+        defer { NectoURLSessionCapture.uninstall() }
+
+        try await forgettingSharedCookies(for: server) {
+            _ = try await URLSession.shared.data(from: server.baseURL.appending(path: "login"))
+            _ = try await URLSession.shared.data(from: server.baseURL.appending(path: "profile"))
+
+            #expect(HTTPCookieStorage.shared.cookies(for: server.baseURL)?.map(\.name) == ["session"])
+            #expect(server.requests.last?.headers["cookie"] == "session=necto")
+        }
+    }
+
+    /// What a configuration says about cookies cannot be seen from the capture, so it
+    /// must not send the shared store's cookies on that session's behalf: one that
+    /// turned cookies off, or keeps its own, would otherwise send cookies it never
+    /// agreed to. That holds whether or not the capture is installed.
+    @Test("sends no shared cookie for a session the app configured", arguments: [false, true])
+    func sendsNoSharedCookieForConfiguredSessions(captured: Bool) async throws {
+        let server = try Self.loginServer()
         defer { server.stop() }
         let records = Records()
         NectoURLSessionCapture.install(reporting: records)
         defer { NectoURLSessionCapture.uninstall() }
 
-        let storage = HTTPCookieStorage.shared
-        let forget = { storage.cookies(for: server.baseURL)?.forEach(storage.deleteCookie) }
-        forget()
-        defer { forget() }
+        let cookiesOff = URLSessionConfiguration.default
+        cookiesOff.httpShouldSetCookies = false
+        let configurations: [(String, URLSessionConfiguration)] = [
+            ("off", cookiesOff),
+            ("ephemeral", .ephemeral),
+        ]
+        for (name, configuration) in configurations {
+            try await forgettingSharedCookies(for: server) {
+                // A cookie the shared store already holds for this host.
+                _ = try await URLSession.shared.data(from: server.baseURL.appending(path: "login"))
+                let session = session(configuration, captured: captured)
+                _ = try await session.data(from: server.baseURL.appending(path: "\(name)/login"))
+                _ = try await session.data(from: server.baseURL.appending(path: "\(name)/profile"))
 
-        let session = session(.default, captured: captured)
-        _ = try await session.data(from: server.baseURL.appending(path: "login"))
-        _ = try await session.data(from: server.baseURL.appending(path: "profile"))
+                #expect(server.requests.last?.headers["cookie"] == nil, "\(name), captured: \(captured)")
+            }
+        }
+    }
 
-        #expect(storage.cookies(for: server.baseURL)?.map(\.name) == ["session"])
-        #expect(server.requests.last?.headers["cookie"] == "session=necto")
+    /// The same applies to a default configuration with cookies on: its policy cannot
+    /// be told from the one above, so its cookies go unhandled while it is captured.
+    @Test("handles no cookie for a captured default configuration")
+    func handlesNoCookieForCapturedDefaultConfiguration() async throws {
+        let server = try Self.loginServer()
+        defer { server.stop() }
+        let records = Records()
+        NectoURLSessionCapture.install(reporting: records)
+        defer { NectoURLSessionCapture.uninstall() }
+
+        try await forgettingSharedCookies(for: server) {
+            let session = session(.default)
+            _ = try await session.data(from: server.baseURL.appending(path: "login"))
+            _ = try await session.data(from: server.baseURL.appending(path: "profile"))
+
+            #expect(HTTPCookieStorage.shared.cookies(for: server.baseURL)?.isEmpty != false)
+            #expect(server.requests.last?.headers["cookie"] == nil)
+        }
     }
 
     @Test("hands over a streamed response as it arrives")
