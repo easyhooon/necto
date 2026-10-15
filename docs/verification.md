@@ -35,7 +35,7 @@ builds, release packaging tests, and a fresh vulnerability scan.
 | Contract change | Update fixtures in the same commit |
 
 `node --test script/tests/package.test.mjs` checks SDK module boundaries, including
-Control's implementation inside `NectoDefaultPlugins` without a separate touch target.
+independent plugin products and exclusion of private runtime modules from the core SDK.
 For touch-runtime changes, inspect all Mach-O files in the final Debug and Release
 iOS apps: the known private selectors must not appear in `__objc_methname`,
 `__objc_selrefs`, or undefined Objective-C message-send symbols. Runtime lookup
