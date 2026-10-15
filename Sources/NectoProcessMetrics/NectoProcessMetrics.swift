@@ -126,6 +126,12 @@ private final class NectoProcessSampler: NectoPerformanceSampling, @unchecked Se
         guard task_threads(mach_task_self_, &threads, &threadCount) == KERN_SUCCESS,
               let threads else { return (0, 0) }
         defer {
+            // The list comes with a port for each thread, and each has to be given
+            // back. One that is kept outlives its thread as a dead name, so a sample
+            // a second would leave one behind for every thread the app ever ran.
+            for index in 0 ..< Int(threadCount) {
+                mach_port_deallocate(mach_task_self_, threads[index])
+            }
             vm_deallocate(
                 mach_task_self_,
                 vm_address_t(bitPattern: threads),
