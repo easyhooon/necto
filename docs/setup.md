@@ -94,8 +94,9 @@ Runtime lookup is not a guarantee of App Store Connect or TestFlight acceptance.
 Inspect the final app and embedded frameworks, and keep the debugging tool out of
 builds distributed to users.
 
-`NectoSDK.start()` starts the listener. However, `URLSessionNetworkPlugin` starts
-capture when registered, so guard plugin creation and registration as well as `start()`.
+`NectoSDK.start()` starts the listener. `URLSessionNetworkPlugin` starts capturing
+when registered, even if `start()` is never called. If you do not want capture,
+do not register this plugin.
 
 Excluding calls does not guarantee removal of all package code and resources.
 What remains depends on linking and build settings such as dead-code stripping.
