@@ -129,7 +129,7 @@ Use a simulator for the loopback connection path.
 
 ```bash
 xcrun simctl boot <device-id>
-xcodebuild -project Necto.xcodeproj -scheme ExampleApp -destination "id=<device-id>" build
+xcodebuild -project Necto.xcodeproj -scheme ExampleApp -destination "id=<device-id>" SYMROOT="$PWD/Build/Products" build
 xcrun simctl install <device-id> Build/Products/Debug-iphonesimulator/ExampleApp.app
 xcrun simctl launch <device-id> im.toss.necto.example
 ```
