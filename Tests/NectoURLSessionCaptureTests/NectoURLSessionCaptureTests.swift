@@ -655,7 +655,11 @@ struct NectoURLSessionCaptureTests {
     @Test("gives the app every byte and keeps only the head of a large response")
     func capsTheRecordedBody() async throws {
         let limit = NectoNetworkRecord.Body.captureLimit
-        let payload = Data((0..<(limit + 4096)).map { UInt8(32 + (($0 / 97 + $0) % 90)) })
+        let bytes: [UInt8] = (0..<(limit + 4096)).map { index in
+            let offset = (index / 97 + index) % 90
+            return UInt8(32 + offset)
+        }
+        let payload = Data(bytes)
         let server = try LocalHTTPServer { _, response in
             response.send(headers: ["Content-Type": "text/plain"], body: payload)
         }
