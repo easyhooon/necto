@@ -70,21 +70,27 @@ public enum NectoNetworkRecordCoding {
     }
 
     /// A command the developer can paste into a terminal to repeat the request.
+    ///
+    /// Every part of it came from the app or a server it talks to, so every part is
+    /// quoted: a URL may hold a quote of its own, and a shell must read each one back
+    /// as a single argument whatever it holds.
     private static func curl(_ record: NectoNetworkRecord) -> String {
-        var parts = ["curl -X \(record.method)", "'\(record.url)'"]
+        // A method is nearly always a bare word, and reads better left as one.
+        let isWord = !record.method.isEmpty && record.method.allSatisfy { $0.isASCII && $0.isLetter }
+        var parts = ["curl -X \(isWord ? record.method : quoted(record.method))", quoted(record.url)]
 
         for key in record.requestHeaders.keys.sorted() {
             let value = record.requestHeaders[key] ?? ""
-            parts.append("-H '\(key): \(escaped(value))'")
+            parts.append("-H \(quoted("\(key): \(value)"))")
         }
         if let text = record.requestBody?.text {
-            parts.append("--data-raw '\(escaped(text))'")
+            parts.append("--data-raw \(quoted(text))")
         }
         return parts.joined(separator: " \\\n  ")
     }
 
-    /// A quote inside a single-quoted shell argument has to close and reopen it.
-    private static func escaped(_ value: String) -> String {
-        value.replacingOccurrences(of: "'", with: "'\\''")
+    /// One single-quoted shell argument. A quote inside it has to close and reopen it.
+    private static func quoted(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
 }
