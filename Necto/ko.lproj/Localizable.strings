@@ -179,7 +179,7 @@
 "Add" = "추가";
 "Agent skills" = "에이전트 스킬";
 "Could not install the skill." = "스킬을 설치하지 못했어요.";
-"Use Necto from %@." = "%@에서 Necto를 사용할 수 있어요.";
+"Use Necto from %@." = "%@에서 Necto를 사용할 수 있습니다.";
 "Command line tool" = "명령줄 도구";
 "Install CLI" = "CLI 설치";
 "Use necto or necto-cli in your terminal." = "터미널에서 necto 또는 necto-cli를 사용할 수 있습니다.";
