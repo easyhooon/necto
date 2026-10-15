@@ -304,9 +304,9 @@ struct NectoURLSessionCaptureTests {
         NectoURLSessionCapture.install(reporting: records)
         defer { NectoURLSessionCapture.uninstall() }
 
+        let started = ContinuousClock.now
         let (bytes, _) = try await session().bytes(from: server.baseURL.appending(path: "stream"))
         var lines = bytes.lines.makeAsyncIterator()
-        let started = ContinuousClock.now
         let first = try await lines.next()
         let waited = ContinuousClock.now - started
         gate.open()
