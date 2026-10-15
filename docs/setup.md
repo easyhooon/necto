@@ -132,7 +132,9 @@ handed back as it arrives. What that changes for a session you add the capture t
   session does itself. What your own configuration says about cookies cannot be seen
   from the capture, so for a session you add it to, no cookie is sent or stored while
   it is captured — a session that relies on cookies sees them stop.
-- **Credentials** come from the shared credential store.
+- **Credentials** come from the shared credential store only for `URLSession.shared`.
+  Sessions your app configures do not use a credential store while captured. An
+  `Authorization` header your app sets explicitly is still forwarded.
 - **Caching** is off: a captured request always loads.
 - **Redirects** are followed without asking your session's delegate, so a delegate
   that refuses a redirect or changes the redirected request has no effect.

@@ -231,6 +231,65 @@ struct NectoURLSessionCaptureTests {
         }
     }
 
+    @Test("keeps shared credentials out of configured sessions", arguments: [false, true])
+    func keepsSharedCredentialsOutOfConfiguredSessions(captured: Bool) async throws {
+        let realm = UUID().uuidString
+        let authorization = "Basic " + Data("necto:test-only".utf8).base64EncodedString()
+        let server = try LocalHTTPServer { request, response in
+            if request.headers["authorization"] == authorization {
+                response.send()
+            } else {
+                response.send(status: 401, headers: ["WWW-Authenticate": "Basic realm=\"\(realm)\""])
+            }
+        }
+        defer { server.stop() }
+        let records = Records()
+        if captured { NectoURLSessionCapture.install(reporting: records) }
+        defer { NectoURLSessionCapture.uninstall() }
+
+        let protectionSpace = URLProtectionSpace(
+            host: "127.0.0.1", port: Int(server.port), protocol: "http",
+            realm: realm, authenticationMethod: NSURLAuthenticationMethodHTTPBasic
+        )
+        let credential = URLCredential(user: "necto", password: "test-only", persistence: .forSession)
+        URLCredentialStorage.shared.setDefaultCredential(credential, for: protectionSpace)
+        defer { URLCredentialStorage.shared.remove(credential, for: protectionSpace) }
+
+        let (_, sharedResponse) = try await URLSession.shared.data(from: server.baseURL.appending(path: "shared-auth"))
+        #expect((sharedResponse as? HTTPURLResponse)?.statusCode == 200)
+        #expect(server.requests.last?.headers["authorization"] == authorization)
+        if captured {
+            #expect(try await records.finished(path: "/shared-auth").statusCode == 200)
+        }
+
+        let credentialsOff = URLSessionConfiguration.default
+        credentialsOff.urlCredentialStorage = nil
+        let configurations: [(String, URLSessionConfiguration)] = [
+            ("ephemeral", .ephemeral),
+            ("off", credentialsOff),
+        ]
+        for (name, configuration) in configurations {
+            let session = session(configuration, captured: captured)
+            defer { session.invalidateAndCancel() }
+
+            var explicitRequest = URLRequest(url: server.baseURL.appending(path: "\(name)/explicit-auth"))
+            explicitRequest.setValue(authorization, forHTTPHeaderField: "Authorization")
+            let (_, explicitResponse) = try await session.data(for: explicitRequest)
+            #expect((explicitResponse as? HTTPURLResponse)?.statusCode == 200)
+            #expect(server.requests.last?.headers["authorization"] == authorization)
+
+            let path = "/\(name)/isolated-auth"
+            let (_, response) = try await session.data(from: server.baseURL.appending(path: path))
+            #expect((response as? HTTPURLResponse)?.statusCode == 401)
+            let requests = server.requests.filter { $0.path == path }
+            #expect(!requests.isEmpty)
+            #expect(requests.allSatisfy { $0.headers["authorization"] == nil })
+            if captured {
+                #expect(try await records.finished(path: path).statusCode == 401)
+            }
+        }
+    }
+
     @Test("hands over a streamed response as it arrives")
     func streamsResponses() async throws {
         let gate = Gate()

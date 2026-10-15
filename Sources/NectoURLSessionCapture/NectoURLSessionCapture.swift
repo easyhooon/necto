@@ -178,6 +178,7 @@ class NectoNetworkObserver: URLProtocol, @unchecked Sendable {
         if !handlesCookies {
             configuration.httpShouldSetCookies = false
             configuration.httpCookieStorage = nil
+            configuration.urlCredentialStorage = nil
         }
         // Every captured session shares this one, so its limit per host would count
         // across all of them, and a few long-lived streams would hold the rest back.
