@@ -16,7 +16,6 @@ let package = Package(
         .library(name: "NectoPreferencesPlugin", targets: ["NectoPreferencesPlugin"]),
         .library(name: "NectoPerformancePlugin", targets: ["NectoPerformancePlugin"]),
         .library(name: "NectoUIControlPlugin", targets: ["NectoUIControlPlugin"]),
-        .library(name: "NectoDefaultPlugin", targets: ["NectoDefaultPlugin"]),
         .library(name: "NectoProcessMetricPlugin", targets: ["NectoProcessMetricPlugin"]),
         .library(name: "NectoURLSessionCapturePlugin", targets: ["NectoURLSessionCapturePlugin"]),
     ],
@@ -59,17 +58,6 @@ let package = Package(
             dependencies: ["NectoModel", "NectoSDK"],
             resources: [.copy("Panels")]
         ),
-        .target(
-            name: "NectoDefaultPlugin",
-            dependencies: [
-                "NectoNetworkPlugin",
-                "NectoEventsPlugin",
-                "NectoFilesPlugin",
-                "NectoPreferencesPlugin",
-                "NectoPerformancePlugin",
-                "NectoUIControlPlugin",
-            ]
-        ),
         // CPU, memory and frame-rate capture for apps that explicitly opt in.
         .target(
             name: "NectoProcessMetricPlugin",
@@ -91,7 +79,7 @@ let package = Package(
         .testTarget(
             name: "NectoSDKTests",
             dependencies: [
-                "NectoSDK", "NectoDefaultPlugin", "NectoProcessMetricPlugin", "NectoTransport", "NectoModel",
+                "NectoSDK", "NectoProcessMetricPlugin", "NectoTransport", "NectoModel",
                 "NectoNetworkPlugin", "NectoEventsPlugin", "NectoFilesPlugin", "NectoPreferencesPlugin",
                 "NectoPerformancePlugin", "NectoUIControlPlugin",
             ]

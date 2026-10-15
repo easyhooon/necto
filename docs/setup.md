@@ -25,7 +25,6 @@ import NectoProcessMetricPlugin
 import NectoSDK
 import NectoURLSessionCapturePlugin
 
-#if DEBUG
 let events = NectoEventsPlugin()
 NectoSDK.register(URLSessionNetworkPlugin())   // network, captured for you
 NectoSDK.register(events)
@@ -33,7 +32,6 @@ NectoSDK.register(ProcessPerformancePlugin())  // six process metrics while obse
 NectoSDK.register(NectoUIControlPlugin())
 NectoSDK.start()
 events.report(NectoEvent(level: .info, tag: "App", message: "App started"))
-#endif
 ```
 
 Register only the plugins you need. Adding the package does not register plugins,
@@ -55,14 +53,12 @@ for a complete implementation.
 | `NectoPerformancePlugin` | Report performance readings | No |
 | `NectoProcessMetricPlugin` | Automatic process metrics | No |
 | `NectoUIControlPlugin` | UI inspection and interaction | Yes |
-| `NectoURLSessionCapturePlugin` | Automatic URLSession recording (Debug only) | Yes |
-| `NectoDefaultPlugin` | All six reporting/UI plugins above, including UI Control | Yes |
+| `NectoURLSessionCapturePlugin` | Automatic URLSession recording | Yes |
 
-`NectoDefaultPlugin` is an optional aggregate, without automatic network or process
-capture. To exclude private APIs, select individual public-API plugins instead.
 Apps previously using only `NectoSDK` must explicitly add the products they use.
-Rename imports `NectoDefaultPlugins`, `NectoProcessMetrics` and `NectoURLSessionCapture`
-to `NectoDefaultPlugin`, `NectoProcessMetricPlugin` and `NectoURLSessionCapturePlugin`.
+Replace `import NectoDefaultPlugins` with imports for the individual plugins above.
+Rename `NectoProcessMetrics` and `NectoURLSessionCapture` imports to
+`NectoProcessMetricPlugin` and `NectoURLSessionCapturePlugin`.
 Registration methods and plugin type names are unchanged.
 
 ```swift
@@ -75,10 +71,9 @@ Registration methods and plugin type names are unchanged.
 
 Do not run debugging tools in builds distributed to users.
 
-> Wrap every Necto call in `#if DEBUG`.
-
-Calls inside `#if DEBUG` are excluded when `DEBUG` is not defined. Check that your
-Release build settings do not define `DEBUG`.
+The SDK does not restrict capture to a build configuration. The app decides where
+to include the products and when to register plugins and start the SDK, including
+internal Release builds.
 
 The built-in UI Control provider synthesizes touches using private UIKit and
 IOHID entry points. Its Swift implementation lives in `NectoUIControlPlugin` and
@@ -121,12 +116,12 @@ dependencies and inspect the actual Release output for remaining code and resour
 
 Start with `URLSessionNetworkPlugin` and `NectoEventsPlugin`. Network requests appear
 as they happen. Keep the registered `events` instance in your app's debug logging code
-and call `events.report(...)` to send log entries, as in the example above. Guard these
-calls with `#if DEBUG` too. Add other plugins for the data you need to inspect.
+and call `events.report(...)` to send log entries, as in the example above. Add other
+plugins for the data you need to inspect.
 
 ### Which requests are captured
 
-Add `NectoURLSessionCapturePlugin` and register `URLSessionNetworkPlugin()` in Debug
+Add `NectoURLSessionCapturePlugin` and register `URLSessionNetworkPlugin()`
 to automatically record HTTP(S) requests from `URLSession.shared` and sessions the
 app creates. Keep normal `URLSession` construction and request calls. No factory,
 wrapper or session protocol is required. Remove any old `protocolClass` registration;
@@ -137,7 +132,8 @@ never reissues a request or replaces the application's configuration or delegate
 Foundation and the app continue to handle credentials, cookies, authentication
 challenges and redirects. Use the public-API-only `NectoNetworkPlugin` for manual logging.
 
-- The entire hooking implementation is inside `#if DEBUG`; Release capture is a no-op.
+- Capture works in both Debug and Release when installed. To exclude its private
+  APIs, omit `NectoURLSessionCapturePlugin` from the app target dependencies.
 - Private Foundation classes and methods are involved. OS changes and other
   SDK hooks can affect capture. Presence and signature checks do not guarantee future compatibility.
 - Data, upload, download and streaming requests are recorded with bounded body previews.

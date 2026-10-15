@@ -43,21 +43,17 @@ public struct URLSessionNetworkPlugin: NectoPlugin {
 /// `URLSessionNetworkPlugin` above is the one-liner; these entry points are for an
 /// app that pairs the capture with a reporter of its own.
 public enum NectoURLSessionCapture {
-    /// Starts automatic capture in Debug builds. Uses private Foundation hooks;
+    /// Starts automatic capture in any build configuration. Uses private Foundation hooks;
     /// do not include this product in apps that prohibit private APIs.
     public static func install(reporting reporter: any NectoNetworkReporting) {
-        #if DEBUG
         NectoURLSessionHooks.install()
         NectoSessionRecorder.shared.install(reporter)
-        #endif
     }
 
     /// Stops recording. Installed hooks remain as pass-throughs so other SDKs' hooks
     /// are not overwritten when capture stops or starts again.
     public static func uninstall() {
-        #if DEBUG
         NectoSessionRecorder.shared.uninstall()
-        #endif
     }
 
     @available(*, deprecated, renamed: "uninstall()")

@@ -3,7 +3,7 @@
 //
 
 import Foundation
-import NectoDefaultPlugin
+import NectoEventsPlugin
 import NectoModel
 import NectoProcessMetricPlugin
 import NectoSDK

@@ -2,12 +2,11 @@
 //  Copyright (c) 2026 Viva Republica, Inc.
 //
 
-#if DEBUG
 import Foundation
 import ObjectiveC
 
 /// Observes the original transfer; never reissues requests or changes delegates.
-/// Private selectors are kept here, entirely excluded from Release compilation.
+/// Private selectors stay in this optional capture module.
 enum NectoURLSessionHooks {
     static func install() { _ = installed }
 
@@ -181,4 +180,3 @@ enum NectoURLSessionHooks {
         }
     }
 }
-#endif

@@ -2,8 +2,10 @@
 //  Copyright (c) 2026 Viva Republica, Inc.
 //
 
-import NectoDefaultPlugin
+import NectoFilesPlugin
+import NectoPreferencesPlugin
 import NectoSDK
+import NectoUIControlPlugin
 import NectoURLSessionCapturePlugin
 import SwiftUI
 

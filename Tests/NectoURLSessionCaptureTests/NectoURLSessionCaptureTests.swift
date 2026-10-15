@@ -4,9 +4,8 @@
 
 import Foundation
 import NectoNetworkPlugin
+import NectoURLSessionCapturePlugin
 import Testing
-
-@testable import NectoURLSessionCapturePlugin
 
 /// Collects what the capture reports, the way `NectoNetworkPlugin` would.
 private final class Records: NectoNetworkReporting, @unchecked Sendable {
@@ -123,7 +122,6 @@ private final class DelegateWitness: NSObject, URLSessionDataDelegate, @unchecke
     }
 }
 
-#if DEBUG
 /// The capture is installed process-wide, so these run one at a time.
 @Suite("URLSession capture", .serialized)
 struct NectoURLSessionCaptureTests {
@@ -750,5 +748,3 @@ struct NectoURLSessionCaptureTests {
         #expect(try await records.finished(path: "/gone").state == .failed)
     }
 }
-
-#endif

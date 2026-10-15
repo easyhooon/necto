@@ -49,7 +49,7 @@ in separate plugin modules.
 A new permission adds a `NectoPlugin` implementation in its own module. It never adds a wire message
 kind, and it never adds a line to `NectoSDKRuntime`.
 
-**Check:** test the evaluated Swift package dependencies and the SDK-only consumer.
+**Check:** test the evaluated Swift package dependencies and the external SDK consumer.
 Review feature boundaries in code; comments and identifier spellings are not test assertions.
 
 ```bash

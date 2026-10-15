@@ -2,7 +2,6 @@
 //  Copyright (c) 2026 Viva Republica, Inc.
 //
 
-#if DEBUG
 import Foundation
 import NectoNetworkPlugin
 
@@ -109,4 +108,3 @@ final class NectoSessionRecorder: @unchecked Sendable {
         if let (reporter, record) = event { reporter.report(record) }
     }
 }
-#endif

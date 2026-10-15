@@ -55,15 +55,10 @@ test("the core SDK and public reporting products exclude private runtime modules
   assert.deepEqual(manifest.products.find(product => product.name === "NectoSDK").targets, ["NectoSDK"]);
   for (const name of ["NectoSDK", "NectoNetworkPlugin"]) {
     const included = closure(name);
-    for (const excluded of ["NectoURLSessionCapturePlugin", "NectoUIControlPlugin", "NectoDefaultPlugin"]) {
+    for (const excluded of ["NectoURLSessionCapturePlugin", "NectoUIControlPlugin"]) {
       assert.ok(!included.has(excluded), `${name} must not link ${excluded}`);
     }
   }
   assert.deepEqual(dependencies("NectoURLSessionCapturePlugin").sort(), ["NectoModel", "NectoNetworkPlugin", "NectoSDK"]);
   assert.deepEqual(dependencies("NectoProcessMetricPlugin").sort(), ["NectoModel", "NectoPerformancePlugin", "NectoSDK"]);
-});
-
-test("the optional default bundle aggregates plugins without automatic capture", () => {
-  assert.deepEqual(dependencies("NectoDefaultPlugin").sort(), [...plugins].sort());
-  assert.ok(!closure("NectoDefaultPlugin").has("NectoURLSessionCapturePlugin"));
 });

@@ -24,7 +24,6 @@ import NectoProcessMetricPlugin
 import NectoSDK
 import NectoURLSessionCapturePlugin
 
-#if DEBUG
 let events = NectoEventsPlugin()
 NectoSDK.register(URLSessionNetworkPlugin())   // network, captured for you
 NectoSDK.register(events)
@@ -32,7 +31,6 @@ NectoSDK.register(ProcessPerformancePlugin())  // six process metrics while obse
 NectoSDK.register(NectoUIControlPlugin())
 NectoSDK.start()
 events.report(NectoEvent(level: .info, tag: "App", message: "App started"))
-#endif
 ```
 
 필요한 플러그인만 등록하세요. 패키지를 추가하는 것만으로 플러그인이 등록되거나
@@ -53,14 +51,12 @@ events.report(NectoEvent(level: .info, tag: "App", message: "App started"))
 | `NectoPerformancePlugin` | Report performance readings | No |
 | `NectoProcessMetricPlugin` | Automatic process metrics | No |
 | `NectoUIControlPlugin` | UI inspection and interaction | Yes |
-| `NectoURLSessionCapturePlugin` | Automatic URLSession recording (Debug only) | Yes |
-| `NectoDefaultPlugin` | All six reporting/UI plugins above, including UI Control | Yes |
+| `NectoURLSessionCapturePlugin` | Automatic URLSession recording | Yes |
 
-`NectoDefaultPlugin`은 편의용 묶음이며 자동 네트워크·성능 캡처를 포함하지 않아요.
-비공개 API를 제외하려면 이 묶음 대신 개별 공개 API 플러그인을 선택하세요.
 기존 `NectoSDK` 하나만 사용하던 앱은 사용하는 product를 명시적으로 추가해야 해요.
-`NectoDefaultPlugins`, `NectoProcessMetrics`, `NectoURLSessionCapture` import는
-각각 `NectoDefaultPlugin`, `NectoProcessMetricPlugin`, `NectoURLSessionCapturePlugin`으로 변경해요.
+`import NectoDefaultPlugins`는 위 표의 개별 플러그인 import로 바꾸세요.
+`NectoProcessMetrics`와 `NectoURLSessionCapture` import는 각각
+`NectoProcessMetricPlugin`과 `NectoURLSessionCapturePlugin`으로 변경해요.
 등록 함수와 플러그인 타입 이름은 유지해요.
 
 ```swift
@@ -73,13 +69,11 @@ events.report(NectoEvent(level: .info, tag: "App", message: "App started"))
 
 사용자에게 배포하는 빌드에서는 디버깅 도구를 실행하면 안 돼요.
 
-> 모든 Necto 호출을 `#if DEBUG`로 감싸 주세요.
-
-`#if DEBUG` 안의 호출은 `DEBUG`가 정의되지 않은 빌드에서 제외돼요.
-Release 빌드 설정에 `DEBUG`가 없는지도 확인하세요.
+SDK는 캡처를 특정 빌드 설정으로 제한하지 않아요. 내부 테스트용 Release 빌드를
+포함해 어떤 타깃에 product를 넣고 언제 플러그인을 등록·시작할지는 앱에서 결정해요.
 
 `NectoSDK.start()`는 수신 대기를 시작해요. 다만 `URLSessionNetworkPlugin`은
-등록할 때 캡처를 시작하므로 `start()`뿐 아니라 플러그인 생성과 등록도 함께 감싸야 해요.
+등록할 때 캡처를 시작하므로 `start()`뿐 아니라 플러그인 등록 여부도 함께 결정하세요.
 
 호출을 제외해도 패키지의 코드와 리소스까지 모두 제거된다고 보장하지는 않아요.
 제거 여부는 링크 방식과 데드 코드 스트리핑 등 빌드 설정에 따라 달라져요.
@@ -102,11 +96,11 @@ Swift 패키지의 소스를 제외할 수는 없어요.
 `URLSessionNetworkPlugin`과 `NectoEventsPlugin`부터 추가해 보세요. 네트워크
 요청이 일어나는 즉시 패널에 나타나요. 등록한 `events` 인스턴스를 앱의 디버그
 로깅 코드에 보관하고 위 예제처럼 `events.report(...)`로 로그를 보내세요.
-이 호출도 `#if DEBUG`로 감싸야 해요. 나머지 플러그인은 확인할 데이터에 맞춰 추가하세요.
+나머지 플러그인은 확인할 데이터에 맞춰 추가하세요.
 
 ### 캡처되는 요청
 
-`NectoURLSessionCapturePlugin`을 추가하고 Debug 빌드에서
+`NectoURLSessionCapturePlugin`을 추가하고
 `NectoSDK.register(URLSessionNetworkPlugin())`을 호출하면 `URLSession.shared`와
 앱에서 직접 만든 세션의 HTTP(S) 요청을 자동으로 기록해요. 기존 `URLSession` 생성과
 요청 코드를 유지하세요. `makeSession`이나 별도 세션 프로토콜은 필요하지 않아요.
@@ -118,7 +112,8 @@ PulseProxy처럼 원래 세션의 실행 경로를 후킹해 관찰해요. 요�
 저장소의 격리, 인증 challenge·리다이렉트 판단은 Foundation과 앱이 그대로 처리해요.
 수동 로깅만 필요하다면 공개 API만 사용하는 `NectoNetworkPlugin`을 사용하세요.
 
-- 후킹 구현 전체는 `#if DEBUG` 안에 있어요. Release에서는 자동 캡처가 동작하지 않아요.
+- 설치하면 Debug·Release 모두 캡처해요. 비공개 API를 제외하려면 앱 타깃의
+  의존성에서 `NectoURLSessionCapturePlugin`을 빼세요.
 - 비공개 Foundation 클래스·메서드를 사용해요. OS 변경과 다른 SDK의 후킹에
   영향을 받을 수 있어요. 메서드 존재 여부와 시그니처를 확인하지만 향후 호환성을 보장하지 않아요.
 - 데이터·업로드·다운로드·스트리밍 요청을 기록하고 본문 미리보기 크기는 제한해요.

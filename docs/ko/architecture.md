@@ -48,7 +48,12 @@ NectoPluginRegistry
 | `NectoCLIService` | 앱과 CLI가 공유하는 control request, response, socket endpoint | 명령어 파싱, provider 실행 |
 | `NectoMacService` | 오퍼레이션 라우팅, host provider, device 연결, control server | UI, 앱 특유의 기능 |
 | `NectoSDK` | 앱 쪽 리스닝, 플러그인 등록, 메시지 라우팅 | 기능 구현, `URLProtocol`, 도메인 타입 |
-| `NectoDefaultPlugin` | Necto가 배포하는 플러그인: 네트워크, 이벤트, 성능 | 앱이 트래픽을 캡처하는 방법 |
+| `NectoNetworkPlugin` | 네트워크 기록과 패널 | 자동 트래픽 캡처 |
+| `NectoEventsPlugin` | 앱 이벤트와 패널 | 자동 이벤트 캡처 |
+| `NectoFilesPlugin` | 파일 탐색과 패널 | 다른 플러그인 |
+| `NectoPreferencesPlugin` | 환경설정 접근과 패널 | 다른 플러그인 |
+| `NectoPerformancePlugin` | 성능 기록과 패널 | 자동 프로세스 샘플링 |
+| `NectoUIControlPlugin` | UI 조회·조작과 iOS 터치 런타임 | 다른 플러그인 |
 | `NectoProcessMetricPlugin` | 선택적인 CPU, 메모리, FPS, 스레드 샘플링 | 앱에 등록되거나 리더가 구독하기 전의 샘플링 |
 | `NectoURLSessionCapturePlugin` | `URLSession`을 쓰는 앱을 위한 하나의 캡처 메커니즘 | 앱에서 끌 수 없는 캡처 기능 |
 | `Necto/` | 셸 UI와 플러그인 호스트 | 기능 화면 |
@@ -115,7 +120,7 @@ hello의 프로토콜 버전이 다르면 협상 없이 연결을 거부해요.
 라이브러리는 Swift 패키지로, 앱 타깃은 `Necto.xcodeproj`로 관리해요.
 
 루트 패키지는 기본 SDK인 `NectoSDK`와 플러그인별 product를 제공해요.
-`NectoDefaultPlugin`은 여섯 플러그인의 선택적 묶음이고 자동 캡처는 별도 product예요.
+자동 캡처는 별도 product이며 기본 SDK의 의존성에 포함되지 않아요.
 앱에서 사용할 플러그인을 `import`하고
 등록해요. 로컬 `NectoMac/Package.swift`는 Mac 서비스와 `necto-cli`, 해당 테스트를
 빌드해요. 공용 타입과 전송 모듈은 루트 product를 통해 사용해요. 반대로 SDK는

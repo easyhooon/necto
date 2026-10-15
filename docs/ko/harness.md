@@ -45,7 +45,7 @@ Mac host  ── runtime ──┬─ host bridge      storage, targets, shell
 새 권한은 별도 모듈에 `NectoPlugin`을 구현해 추가해요. 와이어 메시지 종류나
 `NectoSDKRuntime` 코드를 추가하지 않아요.
 
-**검사** — Swift 패키지의 실제 의존성과 SDK만 추가한 앱의 연결을 확인해요.
+**검사** — Swift 패키지의 실제 의존성과 외부 패키지에서의 SDK 사용을 확인해요.
 기능별 모듈 분리는 코드 리뷰에서 확인하며, 주석이나 식별자 표기를 테스트하지는 않아요.
 
 ```bash

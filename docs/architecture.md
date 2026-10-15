@@ -48,7 +48,12 @@ handlers and manifest bindings, not a feature-specific host adapter or wire mess
 | `NectoCLIService` | Control request, response and socket endpoint shared by the app and CLI | Command parsing or provider execution |
 | `NectoMacService` | Operation routing, host providers, device connections and control server | UI or app-specific features |
 | `NectoSDK` | App-side listening, plugin registration and message routing | Feature implementations, `URLProtocol` or domain types |
-| `NectoDefaultPlugin` | The plugins Necto ships, including UI Control and its iOS touch runtime | How an app captures traffic |
+| `NectoNetworkPlugin` | Network records and panel | Automatic traffic capture |
+| `NectoEventsPlugin` | Application events and panel | Automatic event capture |
+| `NectoFilesPlugin` | File browsing and panel | Other plugins |
+| `NectoPreferencesPlugin` | Preferences access and panel | Other plugins |
+| `NectoPerformancePlugin` | Performance readings and panel | Automatic process sampling |
+| `NectoUIControlPlugin` | UI inspection, interaction and iOS touch runtime | Other plugins |
 | `NectoProcessMetricPlugin` | Optional CPU, memory, FPS and thread sampling | Starting unless the app registers it and a reader subscribes |
 | `NectoURLSessionCapturePlugin` | One capture mechanism, for apps using `URLSession` | Capture that an app cannot disable |
 | `Necto/` | Shell UI and the plugin host | Feature screens |
@@ -120,8 +125,7 @@ See [the trust policy](plugin-manifest.md#identity-and-trust).
 Libraries are managed as Swift packages, and app targets live in `Necto.xcodeproj`.
 
 The root package exposes `NectoSDK` for the bridge and separate products for each plugin.
-`NectoDefaultPlugin` optionally aggregates all six reporting/UI plugins; capture products
-remain separate and are never dependencies of the core SDK. Apps import and register
+Capture products remain separate and are never dependencies of the core SDK. Apps import and register
 the plugins they use. The local `NectoMac/Package.swift` builds Mac services, `necto-cli` and their
 tests. It depends on the root product for shared types and transport; the SDK has no
 dependency on the Mac package or ArgumentParser. Run `script/test swift` to test both
