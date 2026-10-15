@@ -72,9 +72,8 @@ events.report(NectoEvent(level: .info, tag: "App", message: "App started"))
 SDK는 캡처를 특정 빌드 설정으로 제한하지 않아요. 내부 테스트용 Release 빌드를
 포함해 어떤 타깃에 product를 넣고 언제 플러그인을 등록·시작할지는 앱에서 결정해요.
 
-`NectoSDK.start()`는 수신 대기를 시작해요. `URLSessionNetworkPlugin`은
-등록할 때 캡처를 시작하므로 `start()`를 호출하지 않아도 캡처돼요.
-캡처를 원하지 않으면 이 플러그인을 등록하지 마세요.
+`URLSessionNetworkPlugin`을 등록하면 네트워크 캡처가 시작돼요.
+`NectoSDK.start()`를 호출하면 Mac의 Necto 앱에서 캡처한 요청을 확인할 수 있어요.
 
 호출을 제외해도 패키지의 코드와 리소스까지 모두 제거된다고 보장하지는 않아요.
 제거 여부는 링크 방식과 데드 코드 스트리핑 등 빌드 설정에 따라 달라져요.
