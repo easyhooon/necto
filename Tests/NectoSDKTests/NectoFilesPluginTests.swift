@@ -6,7 +6,7 @@ import NectoModel
 import Foundation
 import Testing
 
-@testable import NectoDefaultPlugins
+@testable import NectoFilesPlugin
 @testable import NectoSDK
 
 /// Runs a plugin's registration the way the runtime does.

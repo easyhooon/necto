@@ -12,15 +12,17 @@ Mac의 다른 프로그램이 접근하는 것을 막지 못해요. 포트를 �
 ## 연결하기
 
 Xcode의 Package Dependencies에 `https://github.com/toss/necto.git`을 추가해요.
-앱 타깃에는 `NectoSDK` product 하나만 선택해요. SDK와 기본 플러그인 모듈이
-함께 들어 있어요. 코드에서는 아래처럼 사용하는 모듈을 `import`해요.
-앱 시작 시 플러그인을 한 번 등록한 다음 SDK를 시작하세요.
+기본 SDK인 `NectoSDK`와 사용할 플러그인 product만 선택해요. 아래 예제에는
+`NectoEventsPlugin`, `NectoProcessMetricPlugin`, `NectoURLSessionCapturePlugin`,
+`NectoUIControlPlugin`이 필요해요. 자동 캡처와 UI 제어는 비공개 API를 사용하므로
+이를 허용하지 않는 앱은 두 product를 추가하지 마세요.
 
 ```swift
-import NectoDefaultPlugins
-import NectoProcessMetrics
+import NectoEventsPlugin
+import NectoUIControlPlugin
+import NectoProcessMetricPlugin
 import NectoSDK
-import NectoURLSessionCapture
+import NectoURLSessionCapturePlugin
 
 #if DEBUG
 let events = NectoEventsPlugin()
@@ -34,24 +36,38 @@ events.report(NectoEvent(level: .info, tag: "App", message: "App started"))
 ```
 
 필요한 플러그인만 등록하세요. 패키지를 추가하는 것만으로 플러그인이 등록되거나
-수신 대기·캡처가 시작되지는 않아요. 등록하지 않은 기본 플러그인의 코드와 패널
-리소스도 product에는 포함돼요. 직접 만든 플러그인도 같은 방식으로
+수신 대기·캡처가 시작되지는 않아요. 선택한 플러그인의 코드와 패널만 의존성에
+포함돼요. 직접 만든 플러그인도 같은 방식으로
 등록하며 앱이 연결되면 해당 패널이 Mac의 Necto 앱에 나타나요.
 전체 구현 예제는 [디바이스 플러그인 튜토리얼](tutorial-device.md)을 참고하세요.
 
-### 기존 의존성 변경하기
+### 필요한 product 선택하기
 
-앱이나 플러그인 패키지에서 `NectoDefaultPlugins`, `NectoProcessMetrics`,
-`NectoURLSessionCapture`, `NectoModel`, `NectoTransport` product를 직접 지정했다면
-`NectoSDK` 하나로 바꿔 주세요. `Package.swift`에서는 다음과 같이 지정해요.
+| Product / import | Purpose | Private APIs |
+| --- | --- | --- |
+| `NectoSDK` | Connection and plugin registration | No |
+| `NectoNetworkPlugin` | Report requests from your own networking hooks | No |
+| `NectoEventsPlugin` | Application events | No |
+| `NectoFilesPlugin` | Files | No |
+| `NectoPreferencesPlugin` | Preferences | No |
+| `NectoPerformancePlugin` | Report performance readings | No |
+| `NectoProcessMetricPlugin` | Automatic process metrics | No |
+| `NectoUIControlPlugin` | UI inspection and interaction | Yes |
+| `NectoURLSessionCapturePlugin` | Automatic URLSession recording (Debug only) | Yes |
+| `NectoDefaultPlugin` | All six reporting/UI plugins above, including UI Control | Yes |
+
+`NectoDefaultPlugin`은 편의용 묶음이며 자동 네트워크·성능 캡처를 포함하지 않아요.
+비공개 API를 제외하려면 이 묶음 대신 개별 공개 API 플러그인을 선택하세요.
+기존 `NectoSDK` 하나만 사용하던 앱은 사용하는 product를 명시적으로 추가해야 해요.
+`NectoDefaultPlugins`, `NectoProcessMetrics`, `NectoURLSessionCapture` import는
+각각 `NectoDefaultPlugin`, `NectoProcessMetricPlugin`, `NectoURLSessionCapturePlugin`으로 변경해요.
+등록 함수와 플러그인 타입 이름은 유지해요.
 
 ```swift
-.product(name: "NectoSDK", package: "necto")
+.product(name: "NectoSDK", package: "necto"),
+.product(name: "NectoNetworkPlugin", package: "necto"),
+.product(name: "NectoEventsPlugin", package: "necto")
 ```
-
-모듈 이름과 `import`, 등록 API는 그대로예요. 다만 기존 product를 참조하는
-패키지 설정은 새 버전을 적용하기 전에 바꿔야 해요. Mac 호스트 product는
-로컬 `NectoMac` 패키지로 옮겼으며 SDK에는 포함되지 않아요.
 
 ## 사용자에게 노출하지 않기
 
@@ -90,33 +106,26 @@ Swift 패키지의 소스를 제외할 수는 없어요.
 
 ### 캡처되는 요청
 
-`URLSessionNetworkPlugin`을 등록하면 `URLSession.shared`의 요청이 캡처돼요.
-앱이 `URLSessionConfiguration`으로 직접 만든 세션은 그 설정에 든 프로토콜만
-사용해요. `.default` 설정도 마찬가지라서, 설정에 캡처를 추가해야 요청이 나타나요.
-자체 세션을 만드는 네트워킹 라이브러리도 여기에 해당해요.
+`NectoURLSessionCapturePlugin`을 추가하고 Debug 빌드에서
+`NectoSDK.register(URLSessionNetworkPlugin())`을 호출하면 `URLSession.shared`와
+앱에서 직접 만든 세션의 HTTP(S) 요청을 자동으로 기록해요. 기존 `URLSession` 생성과
+요청 코드를 유지하세요. `makeSession`이나 별도 세션 프로토콜은 필요하지 않아요.
+기존 `NectoURLSessionCapture.protocolClass` 등록은 제거해도 돼요.
+호환용으로 남아 있지만 요청을 가로채지 않아요.
 
-```swift
-let configuration = URLSessionConfiguration.default
-#if DEBUG
-configuration.protocolClasses = [NectoURLSessionCapture.protocolClass]
-    + (configuration.protocolClasses ?? [])
-#endif
-let session = URLSession(configuration: configuration)
-```
+PulseProxy처럼 원래 세션의 실행 경로를 후킹해 관찰해요. 요청을 재전송하거나
+앱의 configuration·delegate를 교체하지 않으므로 정상 인증, 쿠키 저장소와 인증
+저장소의 격리, 인증 challenge·리다이렉트 판단은 Foundation과 앱이 그대로 처리해요.
+수동 로깅만 필요하다면 공개 API만 사용하는 `NectoNetworkPlugin`을 사용하세요.
 
-캡처된 요청은 Necto가 만든 세션으로 다시 보내지고, 응답은 도착하는 대로 앱에
-전달돼요. 캡처를 추가한 세션에서는 다음이 달라져요.
+- 후킹 구현 전체는 `#if DEBUG` 안에 있어요. Release에서는 자동 캡처가 동작하지 않아요.
+- 비공개 Foundation 클래스·메서드를 사용해요. OS 변경과 다른 SDK의 후킹에
+  영향을 받을 수 있어요. 메서드 존재 여부와 시그니처를 확인하지만 향후 호환성을 보장하지 않아요.
+- 데이터·업로드·다운로드·스트리밍 요청을 기록하고 본문 미리보기 크기는 제한해요.
+  앱의 스트림을 읽어서 소비하지 않으므로 스트림 기반 업로드 본문은 기록되지 않을 수 있어요.
+- WebSocket 메시지와 별도 프로세스에서 실행되는 백그라운드 전송은 지원 범위가 아니에요.
+- `uninstall()`은 기록을 멈춰요. 다른 SDK의 후킹을 덮어쓰지 않도록 설치한 후크는
+  원래 구현을 호출하는 상태로 남아요.
 
-- **쿠키**는 `URLSession.shared`에 대해서만 그 세션과 똑같이 공유 저장소로 처리돼요.
-  앱이 직접 만든 설정의 쿠키 정책은 캡처에서 볼 수 없으므로, 캡처를 추가한 세션은
-  캡처되는 동안 쿠키를 보내지도 저장하지도 않아요 — 쿠키에 의존하는 세션은 그동안
-  쿠키가 동작하지 않아요.
-- **자격 증명**은 `URLSession.shared`에 대해서만 공유 자격 증명 저장소를 사용해요.
-  앱이 직접 설정한 세션은 캡처되는 동안 자격 증명 저장소를 사용하지 않아요.
-  앱이 명시적으로 설정한 `Authorization` 헤더는 그대로 전달돼요.
-- **캐시**는 사용하지 않아요. 캡처된 요청은 항상 새로 불러와요.
-- **리다이렉트**는 앱 세션의 델리게이트에 묻지 않고 따라가요. 델리게이트에서
-  리다이렉트를 거부하거나 리다이렉트된 요청을 바꿔도 적용되지 않아요.
-- **인증 챌린지**는 델리게이트에 전달되지 않아요. 델리게이트가 허용하거나 피닝하는
-  서버 인증서와 델리게이트가 제공하는 자격 증명이 캡처된 요청에는 적용되지 않으므로,
-  자체 서명 인증서를 쓰는 개발 서버로의 요청은 실패해요.
+참고 구현: [PulseProxy](https://github.com/kean/Pulse/blob/main/Sources/PulseProxy/URLSessionSwizzler.swift),
+[Atlantis의 Network.framework 로더 지원](https://github.com/ProxymanApp/atlantis/blob/main/Sources/NetworkInjector%2BNWURLSession.swift).

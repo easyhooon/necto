@@ -3,7 +3,7 @@
 //
 
 import NectoModel
-import NectoProcessMetrics
+import NectoProcessMetricPlugin
 import Foundation
 import Testing
 

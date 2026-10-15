@@ -5,7 +5,7 @@
 import Foundation
 import Testing
 
-@testable import NectoDefaultPlugins
+@testable import NectoNetworkPlugin
 
 @Suite("Network record")
 struct NectoNetworkRecordTests {

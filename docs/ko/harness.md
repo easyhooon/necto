@@ -62,11 +62,11 @@ Necto는 앱이 요청을 만들고 뷰를 배치하고 플래그를 저장하�
 그래서 Necto는 **인터페이스와 선택적인 구현을 별도로 배포해요.**
 
 ```swift
-NectoDefaultPlugins       // the interface: network.report(record)
-NectoURLSessionCapture    // one implementation, its own module, opt-in
+NectoNetworkPlugin          // the interface: network.report(record)
+NectoURLSessionCapturePlugin // one implementation, its own module, opt-in
 ```
 
-두 모듈은 `NectoSDK` product에 함께 들어 있어요. 별도의 네트워크 스택을 쓰는
+두 모듈은 각각 별도 SPM product이고 `NectoSDK`에는 포함되지 않아요. 별도의 네트워크 스택을 쓰는
 앱은 보고용 플러그인을 등록하고 `report(_:)`를 호출해요. URLSession 캡처는 켜지 않아요.
 구현을 인터페이스 모듈에 포함하면 다른 스택을 쓰는 앱에도 특정 구현을 강제하게 돼요.
 

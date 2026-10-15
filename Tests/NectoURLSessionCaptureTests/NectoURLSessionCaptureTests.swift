@@ -3,10 +3,10 @@
 //
 
 import Foundation
-import NectoDefaultPlugins
+import NectoNetworkPlugin
 import Testing
 
-@testable import NectoURLSessionCapture
+@testable import NectoURLSessionCapturePlugin
 
 /// Collects what the capture reports, the way `NectoNetworkPlugin` would.
 private final class Records: NectoNetworkReporting, @unchecked Sendable {
@@ -34,6 +34,39 @@ private final class Records: NectoNetworkReporting, @unchecked Sendable {
             try await Task.sleep(for: .milliseconds(10))
         }
         throw CocoaError(.fileReadUnknown)
+    }
+}
+
+private final class AuthenticationDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    let credential: URLCredential?
+    private let lock = NSLock()
+    private var count = 0
+    var challenges: Int { lock.withLock { count } }
+
+    init(credential: URLCredential?) { self.credential = credential }
+
+    // A task-specific creation callback must not bypass capture or session policies.
+    func urlSession(_ session: URLSession, didCreateTask task: URLSessionTask) {}
+
+    func urlSession(
+        _ session: URLSession, task: URLSessionTask, didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        lock.withLock { count += 1 }
+        if challenge.previousFailureCount == 0, let credential {
+            completionHandler(.useCredential, credential)
+        } else {
+            completionHandler(.cancelAuthenticationChallenge, nil)
+        }
+    }
+}
+
+private final class RedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    func urlSession(
+        _ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
     }
 }
 
@@ -90,6 +123,7 @@ private final class DelegateWitness: NSObject, URLSessionDataDelegate, @unchecke
     }
 }
 
+#if DEBUG
 /// The capture is installed process-wide, so these run one at a time.
 @Suite("URLSession capture", .serialized)
 struct NectoURLSessionCaptureTests {
@@ -105,17 +139,79 @@ struct NectoURLSessionCaptureTests {
         )
     }
 
-    /// A session an app configured itself, with the capture in front as documented.
+    /// Ordinary native sessions; legacy registration is an inert compatibility path.
     private func session(
         _ configuration: URLSessionConfiguration = .ephemeral,
         captured: Bool = true,
-        delegate: (any URLSessionDelegate)? = nil
+        delegate: (any URLSessionDelegate)? = nil,
+        legacy: Bool = false
     ) -> URLSession {
         if captured {
-            configuration.protocolClasses = [NectoURLSessionCapture.protocolClass]
-                + (configuration.protocolClasses ?? [])
+            if !legacy { return URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil) }
+            configuration.protocolClasses = [NectoURLSessionCapture.protocolClass] + (configuration.protocolClasses ?? [])
         }
         return URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
+    }
+
+    @Test("preserves authentication, isolation and body capture in both loaders", arguments: [false, true])
+    func preservesBothLoaders(classic: Bool) async throws {
+        guard #available(iOS 18.4, macOS 15.4, *) else { return }
+        let realm = UUID().uuidString
+        let authorization = "Basic " + Data("necto:private-store".utf8).base64EncodedString()
+        let server = try LocalHTTPServer { request, response in
+            if request.path.hasSuffix("/auth") {
+                if request.headers["authorization"] == authorization { response.send(body: Data("authorized".utf8)) }
+                else { response.send(status: 401, headers: ["WWW-Authenticate": "Basic realm=\"\(realm)\""]) }
+            } else if request.path == "/login" {
+                response.send(headers: ["Set-Cookie": "session=private; Path=/"])
+            } else { Self.echo(request, response) }
+        }
+        defer { server.stop() }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.usesClassicLoadingMode = classic
+        let space = URLProtectionSpace(host: "127.0.0.1", port: Int(server.port), protocol: "http",
+                                       realm: realm, authenticationMethod: NSURLAuthenticationMethodHTTPBasic)
+        configuration.urlCredentialStorage?.setDefaultCredential(
+            URLCredential(user: "necto", password: "private-store", persistence: .forSession), for: space)
+        // Session and task creation need no Necto API, even before capture starts.
+        let observed = URLSession(configuration: configuration)
+        defer { observed.invalidateAndCancel() }
+        #expect(NSStringFromClass(type(of: observed)).contains("NWURLSession") == !classic)
+        let records = Records()
+        NectoURLSessionCapture.install(reporting: records)
+        defer { NectoURLSessionCapture.uninstall() }
+        _ = try await observed.data(from: server.baseURL.appending(path: "login"))
+        _ = try await observed.data(from: server.baseURL.appending(path: "profile"))
+        #expect(server.requests.last?.headers["cookie"] == "session=private")
+        let (_, authenticated) = try await observed.data(from: server.baseURL.appending(path: "private/auth"))
+        #expect((authenticated as? HTTPURLResponse)?.statusCode == 200)
+        #expect(try await records.finished(path: "/private/auth").responseBody?.text == "authorized")
+
+        let other = URLSessionConfiguration.ephemeral
+        other.usesClassicLoadingMode = classic
+        let isolated = URLSession(configuration: other)
+        defer { isolated.invalidateAndCancel() }
+        let (_, anonymous) = try await isolated.data(from: server.baseURL.appending(path: "isolated/auth"))
+        #expect((anonymous as? HTTPURLResponse)?.statusCode == 401)
+        #expect(server.requests.last?.headers["authorization"] == nil)
+        #expect(server.requests.last?.headers["cookie"] == nil)
+        #expect(try await records.finished(path: "/isolated/auth").statusCode == 401)
+
+        var upload = URLRequest(url: server.baseURL.appending(path: "async-upload"))
+        upload.httpMethod = "POST"
+        let (data, _) = try await observed.upload(for: upload, from: Data("uploaded".utf8))
+        #expect(server.requests.last?.body == Data("uploaded".utf8))
+        let uploadRecord = try await records.finished(path: "/async-upload")
+        #expect(uploadRecord.requestBody?.text == "uploaded")
+        #expect(uploadRecord.responseBody?.text == String(decoding: data, as: UTF8.self))
+        let (bytes, _) = try await observed.bytes(from: server.baseURL.appending(path: "bytes"))
+        var body = Data()
+        for try await byte in bytes { body.append(byte) }
+        #expect(try await records.finished(path: "/bytes").responseBody?.text == String(decoding: body, as: UTF8.self))
+        let (file, _) = try await observed.download(from: server.baseURL.appending(path: "download"))
+        defer { try? FileManager.default.removeItem(at: file) }
+        let downloaded = try Data(contentsOf: file)
+        #expect(try await records.finished(path: "/download").responseBody?.text == String(decoding: downloaded, as: UTF8.self))
     }
 
     @Test("reports the body of a request that carries one")
@@ -180,16 +276,12 @@ struct NectoURLSessionCaptureTests {
         }
     }
 
-    /// What a configuration says about cookies cannot be seen from the capture, so it
-    /// must not send the shared store's cookies on that session's behalf: one that
-    /// turned cookies off, or keeps its own, would otherwise send cookies it never
-    /// agreed to. That holds whether or not the capture is installed.
     @Test("sends no shared cookie for a session the app configured", arguments: [false, true])
     func sendsNoSharedCookieForConfiguredSessions(captured: Bool) async throws {
         let server = try Self.loginServer()
         defer { server.stop() }
         let records = Records()
-        NectoURLSessionCapture.install(reporting: records)
+        if captured { NectoURLSessionCapture.install(reporting: records) }
         defer { NectoURLSessionCapture.uninstall() }
 
         let cookiesOff = URLSessionConfiguration.default
@@ -198,7 +290,9 @@ struct NectoURLSessionCaptureTests {
             ("off", cookiesOff),
             ("ephemeral", .ephemeral),
         ]
-        for (name, configuration) in configurations {
+        let storageOff = URLSessionConfiguration.default
+        storageOff.httpCookieStorage = nil
+        for (name, configuration) in configurations + [("no-storage", storageOff)] {
             try await forgettingSharedCookies(for: server) {
                 // A cookie the shared store already holds for this host.
                 _ = try await URLSession.shared.data(from: server.baseURL.appending(path: "login"))
@@ -211,10 +305,8 @@ struct NectoURLSessionCaptureTests {
         }
     }
 
-    /// The same applies to a default configuration with cookies on: its policy cannot
-    /// be told from the one above, so its cookies go unhandled while it is captured.
-    @Test("handles no cookie for a captured default configuration")
-    func handlesNoCookieForCapturedDefaultConfiguration() async throws {
+    @Test("preserves cookies for a captured default configuration")
+    func preservesCookiesForCapturedDefaultConfiguration() async throws {
         let server = try Self.loginServer()
         defer { server.stop() }
         let records = Records()
@@ -226,13 +318,13 @@ struct NectoURLSessionCaptureTests {
             _ = try await session.data(from: server.baseURL.appending(path: "login"))
             _ = try await session.data(from: server.baseURL.appending(path: "profile"))
 
-            #expect(HTTPCookieStorage.shared.cookies(for: server.baseURL)?.isEmpty != false)
-            #expect(server.requests.last?.headers["cookie"] == nil)
+            #expect(HTTPCookieStorage.shared.cookies(for: server.baseURL)?.map(\.name) == ["session"])
+            #expect(server.requests.last?.headers["cookie"] == "session=necto")
         }
     }
 
-    @Test("keeps shared credentials out of configured sessions", arguments: [false, true])
-    func keepsSharedCredentialsOutOfConfiguredSessions(captured: Bool) async throws {
+    @Test("keeps shared credentials out of configured sessions", arguments: [false, true], [false, true])
+    func keepsSharedCredentialsOutOfConfiguredSessions(captured: Bool, legacy: Bool) async throws {
         let realm = UUID().uuidString
         let authorization = "Basic " + Data("necto:test-only".utf8).base64EncodedString()
         let server = try LocalHTTPServer { request, response in
@@ -269,7 +361,7 @@ struct NectoURLSessionCaptureTests {
             ("off", credentialsOff),
         ]
         for (name, configuration) in configurations {
-            let session = session(configuration, captured: captured)
+            let session = session(configuration, captured: captured, legacy: legacy)
             defer { session.invalidateAndCancel() }
 
             var explicitRequest = URLRequest(url: server.baseURL.appending(path: "\(name)/explicit-auth"))
@@ -288,6 +380,175 @@ struct NectoURLSessionCaptureTests {
                 #expect(try await records.finished(path: path).statusCode == 401)
             }
         }
+    }
+
+    @Test("preserves default and private credential stores", arguments: [false, true])
+    func preservesCredentialStores(captured: Bool) async throws {
+        let authorization = "Basic " + Data("necto:test-only".utf8).base64EncodedString()
+        let realm = UUID().uuidString
+        let server = try LocalHTTPServer { request, response in
+            if request.headers["authorization"] == authorization { response.send() }
+            else { response.send(status: 401, headers: ["WWW-Authenticate": "Basic realm=\"\(realm)\""]) }
+        }
+        defer { server.stop() }
+        let records = Records()
+        if captured { NectoURLSessionCapture.install(reporting: records) }
+        defer { NectoURLSessionCapture.uninstall() }
+        let space = URLProtectionSpace(host: "127.0.0.1", port: Int(server.port), protocol: "http", realm: realm, authenticationMethod: NSURLAuthenticationMethodHTTPBasic)
+        let credential = URLCredential(user: "necto", password: "test-only", persistence: .forSession)
+        for (name, configuration) in [("default", URLSessionConfiguration.default), ("private", .ephemeral)] {
+            let storage = try #require(configuration.urlCredentialStorage)
+            storage.setDefaultCredential(credential, for: space)
+            defer { storage.remove(credential, for: space) }
+            let observed = session(configuration, captured: captured)
+            defer { observed.invalidateAndCancel() }
+            let url = server.baseURL.appending(path: "stored-auth/\(name)")
+            let (_, response) = try await observed.data(from: url)
+            #expect((response as? HTTPURLResponse)?.statusCode == 200)
+            #expect(server.requests.last?.headers["authorization"] == authorization)
+
+            let isolated = session(.ephemeral, captured: captured)
+            defer { isolated.invalidateAndCancel() }
+            let (_, isolatedResponse) = try await isolated.data(from: server.baseURL.appending(path: "other-session/\(name)"))
+            #expect((isolatedResponse as? HTTPURLResponse)?.statusCode == 401)
+            let anonymous = server.requests.filter { $0.path == "/other-session/\(name)" }
+            #expect(!anonymous.isEmpty && anonymous.allSatisfy { $0.headers["authorization"] == nil })
+            if captured {
+                #expect(try await records.finished(path: "/stored-auth/\(name)").statusCode == 200)
+                #expect(try await records.finished(path: "/other-session/\(name)").statusCode == 401)
+            } else { #expect(records.all.isEmpty) }
+        }
+    }
+
+    @Test("preserves session and task authentication delegates", arguments: [false, true])
+    func preservesAuthenticationDelegates(taskSpecific: Bool) async throws {
+        let authorization = "Basic " + Data("necto:delegate-only".utf8).base64EncodedString()
+        let realm = UUID().uuidString
+        let server = try LocalHTTPServer { request, response in
+            if request.headers["authorization"] == authorization { response.send() }
+            else { response.send(status: 401, headers: ["WWW-Authenticate": "Basic realm=\"\(realm)\""]) }
+        }
+        defer { server.stop() }
+        let records = Records()
+        NectoURLSessionCapture.install(reporting: records)
+        defer { NectoURLSessionCapture.uninstall() }
+        let witness = AuthenticationDelegate(credential: URLCredential(user: "necto", password: "delegate-only", persistence: .forSession))
+        let observed = session(.ephemeral, delegate: taskSpecific ? nil : witness)
+        defer { observed.invalidateAndCancel() }
+        let (_, response) = try await observed.data(from: server.baseURL.appending(path: "delegate-auth"), delegate: taskSpecific ? witness : nil)
+        #expect((response as? HTTPURLResponse)?.statusCode == 200)
+        #expect(witness.challenges == 1)
+        #expect(try await records.finished(path: "/delegate-auth").statusCode == 200)
+
+        let refusal = AuthenticationDelegate(credential: nil)
+        let denied = session(.ephemeral, delegate: taskSpecific ? nil : refusal)
+        defer { denied.invalidateAndCancel() }
+        await #expect(throws: URLError.self) {
+            _ = try await denied.data(from: server.baseURL.appending(path: "denied-auth"), delegate: taskSpecific ? refusal : nil)
+        }
+        #expect(refusal.challenges == 1)
+        #expect(try await records.finished(path: "/denied-auth").state == .failed)
+    }
+
+    @Test("forwards a shared session task's authentication decision")
+    func forwardsSharedTaskAuthentication() async throws {
+        let realm = UUID().uuidString
+        let authorization = "Basic " + Data("necto:delegate-only".utf8).base64EncodedString()
+        let server = try LocalHTTPServer { request, response in
+            if request.headers["authorization"] == authorization { response.send() }
+            else { response.send(status: 401, headers: ["WWW-Authenticate": "Basic realm=\"\(realm)\""]) }
+        }
+        defer { server.stop() }
+        let records = Records()
+        NectoURLSessionCapture.install(reporting: records)
+        defer { NectoURLSessionCapture.uninstall() }
+        let witness = AuthenticationDelegate(credential: URLCredential(user: "necto", password: "delegate-only", persistence: .none))
+        let (_, response) = try await URLSession.shared.data(from: server.baseURL.appending(path: "shared-delegate"), delegate: witness)
+        #expect((response as? HTTPURLResponse)?.statusCode == 200)
+        #expect(witness.challenges == 1)
+        #expect(try await records.finished(path: "/shared-delegate").statusCode == 200)
+    }
+
+    @Test("preserves ephemeral cookies without sharing them between sessions")
+    func preservesPrivateCookies() async throws {
+        let server = try Self.loginServer()
+        defer { server.stop() }
+        let records = Records()
+        NectoURLSessionCapture.install(reporting: records)
+        defer { NectoURLSessionCapture.uninstall() }
+        let first = session(.ephemeral)
+        let second = session(.ephemeral)
+        defer { first.invalidateAndCancel(); second.invalidateAndCancel() }
+        try await forgettingSharedCookies(for: server) {
+            _ = try await first.data(from: server.baseURL.appending(path: "login"))
+            _ = try await first.data(from: server.baseURL.appending(path: "profile"))
+            #expect(server.requests.last?.headers["cookie"] == "session=necto")
+            _ = try await second.data(from: server.baseURL.appending(path: "profile"))
+            #expect(server.requests.last?.headers["cookie"] == nil)
+            #expect(HTTPCookieStorage.shared.cookies(for: server.baseURL)?.isEmpty != false)
+        }
+    }
+
+    @Test("preserves redirect refusals and URL caching")
+    func preservesRedirectsAndCache() async throws {
+        let server = try LocalHTTPServer { request, response in
+            if request.path == "/old" { response.send(status: 302, headers: ["Location": "/new"]) }
+            else { response.send(headers: ["Cache-Control": "max-age=600"], body: Data("cached".utf8)) }
+        }
+        defer { server.stop() }
+        let records = Records()
+        NectoURLSessionCapture.install(reporting: records)
+        defer { NectoURLSessionCapture.uninstall() }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.urlCache = URLCache(memoryCapacity: 1_000_000, diskCapacity: 0)
+        let observed = session(configuration, delegate: RedirectDelegate())
+        defer { observed.invalidateAndCancel() }
+        let (_, response) = try await observed.data(from: server.baseURL.appending(path: "old"))
+        #expect((response as? HTTPURLResponse)?.statusCode == 302)
+        #expect(!server.requests.contains { $0.path == "/new" })
+        for _ in 0..<2 {
+            let (data, _) = try await observed.data(from: server.baseURL.appending(path: "cache"))
+            #expect(data == Data("cached".utf8))
+        }
+        #expect(server.requests.filter { $0.path == "/cache" }.count == 1)
+        #expect(records.finished(on: server).count == 3)
+    }
+
+    @Test("records completion handlers, uploads and downloads once")
+    func recordsConvenienceAPIs() async throws {
+        let server = try LocalHTTPServer(respond: Self.echo)
+        defer { server.stop() }
+        let records = Records()
+        NectoURLSessionCapture.install(reporting: records)
+        defer { NectoURLSessionCapture.uninstall() }
+        let observed = session()
+        defer { observed.invalidateAndCancel() }
+        let data: Data = try await withCheckedThrowingContinuation { continuation in
+            observed.dataTask(with: server.baseURL.appending(path: "completion")) { data, _, error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume(returning: data ?? Data()) }
+            }.resume()
+        }
+        #expect(try await records.finished(path: "/completion").responseBody?.text == String(decoding: data, as: UTF8.self))
+        var request = URLRequest(url: server.baseURL.appending(path: "upload"))
+        request.httpMethod = "POST"
+        let body = Data("uploaded".utf8)
+        let _: Data = try await withCheckedThrowingContinuation { continuation in
+            observed.uploadTask(with: request, from: body) { data, _, error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume(returning: data ?? Data()) }
+            }.resume()
+        }
+        #expect(server.requests.last?.body == body)
+        #expect(try await records.finished(path: "/upload").requestBody?.text == "uploaded")
+        let downloaded: Data = try await withCheckedThrowingContinuation { continuation in
+            observed.downloadTask(with: server.baseURL.appending(path: "download")) { file, _, error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume(with: Result { try Data(contentsOf: file!) }) }
+            }.resume()
+        }
+        #expect(try await records.finished(path: "/download").responseBody?.text == String(decoding: downloaded, as: UTF8.self))
+        #expect(records.finished(on: server).count == 3)
     }
 
     @Test("hands over a streamed response as it arrives")
@@ -316,15 +577,12 @@ struct NectoURLSessionCaptureTests {
         #expect(first == "first")
         #expect(waited < .seconds(2))
         #expect(try await lines.next() == "second")
+        #expect(try await lines.next() == nil)
 
         let record = try await records.finished(path: "/stream")
         #expect(record.responseBody?.text == "first\nsecond\n")
     }
 
-    /// Handing a redirect to the app's session instead looks right and is not: told
-    /// the load was cancelled for the redirect, the session now and then reports that
-    /// cancellation rather than following. Once in some hundreds of requests is enough
-    /// to matter, so this asks that many times.
     @Test("follows a redirect every time and hands over where it led")
     func followsRedirects() async throws {
         let server = try LocalHTTPServer { request, response in
@@ -384,7 +642,7 @@ struct NectoURLSessionCaptureTests {
         let server = try LocalHTTPServer(respond: Self.echo)
         defer { server.stop() }
         let records = Records()
-        NectoURLSessionCapture.install(reporting: records)
+        if captured { NectoURLSessionCapture.install(reporting: records) }
         defer { NectoURLSessionCapture.uninstall() }
 
         let witness = DelegateWitness()
@@ -399,7 +657,7 @@ struct NectoURLSessionCaptureTests {
     @Test("gives the app every byte and keeps only the head of a large response")
     func capsTheRecordedBody() async throws {
         let limit = NectoNetworkRecord.Body.captureLimit
-        let payload = Data(repeating: UInt8(ascii: "a"), count: limit + 4096)
+        let payload = Data((0..<(limit + 4096)).map { UInt8(32 + (($0 / 97 + $0) % 90)) })
         let server = try LocalHTTPServer { _, response in
             response.send(headers: ["Content-Type": "text/plain"], body: payload)
         }
@@ -415,7 +673,7 @@ struct NectoURLSessionCaptureTests {
         #expect(record.responseByteCount == payload.count)
         #expect(record.responseBody?.byteCount == payload.count)
         #expect(record.responseBody?.isTruncated == true)
-        #expect(record.responseBody?.text?.utf8.count == limit)
+        #expect(record.responseBody?.text == String(decoding: payload.prefix(limit), as: UTF8.self))
     }
 
     @Test("reports a request the app cancels part way as failed")
@@ -457,6 +715,26 @@ struct NectoURLSessionCaptureTests {
         #expect(try await records.finished(path: "/shared").statusCode == 200)
     }
 
+    @Test("configured sessions stop intercepting when capture is uninstalled")
+    func uninstallStopsConfiguredCapture() async throws {
+        let server = try Self.loginServer()
+        defer { server.stop() }
+        let records = Records()
+        let observed = session(.ephemeral)
+        defer { observed.invalidateAndCancel(); NectoURLSessionCapture.uninstall() }
+
+        _ = try await observed.data(from: server.baseURL.appending(path: "before"))
+        #expect(records.all.isEmpty)
+        NectoURLSessionCapture.install(reporting: records)
+        _ = try await observed.data(from: server.baseURL.appending(path: "captured"))
+        #expect(try await records.finished(path: "/captured").state == .completed)
+        NectoURLSessionCapture.uninstall()
+        _ = try await observed.data(from: server.baseURL.appending(path: "login"))
+        _ = try await observed.data(from: server.baseURL.appending(path: "profile"))
+        #expect(server.requests.last?.headers["cookie"] == "session=necto")
+        #expect(records.finished(on: server).count == 1)
+    }
+
     @Test("reports a request that fails and gives the app its error")
     func reportsFailures() async throws {
         let server = try LocalHTTPServer(respond: Self.echo)
@@ -472,3 +750,5 @@ struct NectoURLSessionCaptureTests {
         #expect(try await records.finished(path: "/gone").state == .failed)
     }
 }
+
+#endif

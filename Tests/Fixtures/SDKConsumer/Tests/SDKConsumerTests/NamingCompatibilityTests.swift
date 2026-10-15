@@ -5,7 +5,7 @@
 import Foundation
 import NectoModel
 import NectoSDK
-import NectoURLSessionCapture
+import NectoURLSessionCapturePlugin
 import Testing
 
 // Keep this adopter on the old API to catch source compatibility regressions.

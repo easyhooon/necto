@@ -10,7 +10,7 @@ extension String {
     /// A character takes up to four bytes, so a cut can land inside one and leave up
     /// to three bytes that are valid as far as they go but decode as nothing. Those are
     /// dropped. Anything else that is not UTF-8 still reads as no text at all.
-    init?(utf8Head head: Data) {
+    package init?(utf8Head head: Data) {
         if let text = String(data: head, encoding: .utf8) {
             self = text
             return
