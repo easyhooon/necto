@@ -4,6 +4,12 @@ Necto's SDK is a debug tool that compiles into your app. This page covers integr
 the SDK and excluding its calls from production builds. Install the Mac app separately
 using [install.md](install.md).
 
+Use Necto only with trusted apps and runtime environments, including development
+devices and networks. The SDK connection has no peer
+authentication or TLS: USB and loopback do not prevent other apps on the device or
+programs on the Mac from connecting. Do not expose or forward its ports to untrusted
+networks.
+
 ## Wiring it up
 
 Add `https://github.com/toss/necto.git` in Xcode's Package Dependencies.
