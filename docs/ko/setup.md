@@ -82,3 +82,34 @@ Swift 패키지의 소스를 제외할 수는 없어요.
 요청이 일어나는 즉시 패널에 나타나요. 등록한 `events` 인스턴스를 앱의 디버그
 로깅 코드에 보관하고 위 예제처럼 `events.report(...)`로 로그를 보내세요.
 이 호출도 `#if DEBUG`로 감싸야 해요. 나머지 플러그인은 확인할 데이터에 맞춰 추가하세요.
+
+### 캡처되는 요청
+
+`URLSessionNetworkPlugin`을 등록하면 `URLSession.shared`의 요청이 캡처돼요.
+앱이 `URLSessionConfiguration`으로 직접 만든 세션은 그 설정에 든 프로토콜만
+사용해요. `.default` 설정도 마찬가지라서, 설정에 캡처를 추가해야 요청이 나타나요.
+자체 세션을 만드는 네트워킹 라이브러리도 여기에 해당해요.
+
+```swift
+let configuration = URLSessionConfiguration.default
+#if DEBUG
+configuration.protocolClasses = [NectoURLSessionCapture.protocolClass]
+    + (configuration.protocolClasses ?? [])
+#endif
+let session = URLSession(configuration: configuration)
+```
+
+캡처된 요청은 Necto가 만든 세션으로 다시 보내지고, 응답은 도착하는 대로 앱에
+전달돼요. 캡처를 추가한 세션에서는 다음이 달라져요.
+
+- **쿠키**는 `URLSession.shared`에 대해서만 그 세션과 똑같이 공유 저장소로 처리돼요.
+  앱이 직접 만든 설정의 쿠키 정책은 캡처에서 볼 수 없으므로, 캡처를 추가한 세션은
+  캡처되는 동안 쿠키를 보내지도 저장하지도 않아요 — 쿠키에 의존하는 세션은 그동안
+  쿠키가 동작하지 않아요.
+- **자격 증명**은 공유 자격 증명 저장소를 사용해요.
+- **캐시**는 사용하지 않아요. 캡처된 요청은 항상 새로 불러와요.
+- **리다이렉트**는 앱 세션의 델리게이트에 묻지 않고 따라가요. 델리게이트에서
+  리다이렉트를 거부하거나 리다이렉트된 요청을 바꿔도 적용되지 않아요.
+- **인증 챌린지**는 델리게이트에 전달되지 않아요. 델리게이트가 허용하거나 피닝하는
+  서버 인증서와 델리게이트가 제공하는 자격 증명이 캡처된 요청에는 적용되지 않으므로,
+  자체 서명 인증서를 쓰는 개발 서버로의 요청은 실패해요.
