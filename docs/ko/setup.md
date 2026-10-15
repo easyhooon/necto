@@ -4,6 +4,11 @@ Necto SDK는 앱과 함께 컴파일되는 디버그 도구예요. SDK를 연결
 사용자에게 노출하지 않도록 설정하는 방법을 다뤄요.
 Mac 앱 설치 방법은 [install.md](install.md)를 참고하세요.
 
+Necto는 신뢰할 수 있는 앱과 실행 환경(개발 기기·네트워크 등)에서만 사용하세요.
+SDK 연결에는 상대 인증과 TLS가 없어요. USB나 루프백만으로는 같은 기기의 다른 앱이나
+Mac의 다른 프로그램이 접근하는 것을 막지 못해요. 포트를 신뢰할 수 없는 네트워크에
+노출하거나 전달하지 마세요.
+
 ## 연결하기
 
 Xcode의 Package Dependencies에 `https://github.com/toss/necto.git`을 추가해요.

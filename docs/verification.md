@@ -179,7 +179,8 @@ For identity or installation changes, also check these with global Full Access o
 3. Remove and reinstall the same ID: the installation UUID changes and the command
    is no longer approved. Duplicate folders and a wrong-ID targeted update are refused.
 4. Update/reconnect a device plugin with the same app bundle ID and plugin ID:
-   shell grants stay. Another app's same ID must not inherit them. The SDK rejects
+   shell execution and authorization requests must be denied whether Global Full Access
+   is on or off. Other operations must keep working. The SDK rejects
    duplicate registration even with assertions disabled; unregister/register works.
 
 For destructive lifecycle tests, use both a temporary `CFFIXED_USER_HOME` for plugin
