@@ -81,7 +81,7 @@ E2E가 실패하면 로그와 테스트 결과를 첨부해요.
 
 ```bash
 xcrun simctl boot <device-id>
-xcodebuild -project Necto.xcodeproj -scheme ExampleApp -destination "id=<device-id>" build
+xcodebuild -project Necto.xcodeproj -scheme ExampleApp -destination "id=<device-id>" SYMROOT="$PWD/Build/Products" build
 xcrun simctl install <device-id> Build/Products/Debug-iphonesimulator/ExampleApp.app
 xcrun simctl launch <device-id> im.toss.necto.example
 ```

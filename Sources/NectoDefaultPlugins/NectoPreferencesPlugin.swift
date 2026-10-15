@@ -168,26 +168,34 @@ public final class NectoPreferencesPlugin: NectoPlugin, @unchecked Sendable {
     static func plain(_ value: NectoJSONValue, as hint: String?) throws -> Any {
         switch (hint, value) {
         case let ("Int", .number(number)):
-            return Int(number)
+            // `Int(_:)` traps outside its range, and the number is whatever was typed.
+            guard let integer = Int(exactly: number) else {
+                throw NectoBridgeError(code: .invalidInput, message: "\(number) is not a value an Int can hold")
+            }
+            return integer
         case let ("Date", .string(text)):
             guard let date = ISO8601DateFormatter().date(from: text) else {
                 throw NectoBridgeError(code: .invalidInput, message: "'\(text)' is not an ISO 8601 date")
             }
             return date
         default:
-            return plain(value)
+            return try plain(value)
         }
     }
 
     /// Back to something `UserDefaults` will store.
-    static func plain(_ value: NectoJSONValue) -> Any {
+    ///
+    /// A property list has no null, and `UserDefaults` raises an exception rather than
+    /// store one, so null is refused here at any depth.
+    static func plain(_ value: NectoJSONValue) throws -> Any {
         switch value {
         case let .string(string): string
         case let .number(number): number
         case let .bool(bool): bool
-        case let .array(values): values.map(plain)
-        case let .object(fields): fields.mapValues(plain)
-        case .null: NSNull()
+        case let .array(values): try values.map(plain)
+        case let .object(fields): try fields.mapValues(plain)
+        case .null:
+            throw NectoBridgeError(code: .invalidInput, message: "UserDefaults cannot store null")
         }
     }
 }
