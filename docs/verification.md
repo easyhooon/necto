@@ -308,10 +308,12 @@ read this bundle value, not an independent source-code version.
 
 Public CI uses GitHub-hosted runners. The Mac job ad-hoc signs its app and test
 bundle; the SDK job builds ExampleApp without signing.
-`Check` runs five jobs: `Mac Build & Tests`, `SDK Build & Tests`,
-`Simulator Connection & CLI E2E`, `Web Plugins Build & Tests`, and `Documentation Build`.
-Mac, SDK and E2E use Xcode 26.6 on `macos-26`; web and documentation builds use
-`ubuntu-24.04`. The four non-E2E jobs use Node 22.12.0, and web and documentation
+`Check` runs six jobs: `Mac Build & Tests`, `SDK Build & Tests`,
+`Simulator Connection & CLI E2E`, `Web Plugins Build & Tests`,
+`Android SDK Build & Tests`, and `Documentation Build`.
+Mac, SDK and E2E use Xcode 26.6 on `macos-26`; web, Android and documentation builds use
+`ubuntu-24.04`. The Android job uses Temurin JDK 17 and runs `./gradlew build` in
+`SDK/Android`, then `script/test-android-artifacts`. The four non-E2E jobs use Node 22.12.0, and web and documentation
 builds use Yarn 4.6.0.
 Documentation deployment remains a separate manual workflow. GitHub Pages must be
 configured to deploy from Actions.
