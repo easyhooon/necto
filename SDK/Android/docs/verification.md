@@ -28,8 +28,9 @@ Run on an Android 17 emulator (`sdk_gphone64_arm64`, API 37) on an Apple silicon
 | `script/test-android-security` | ✅ A silent handshake is dropped after 5 seconds. Frames of 0 bytes, 64 KiB + 1 and 4 GiB are dropped, as are nesting past 64, a frame that stalls for 10 seconds, and 33 concurrent requests. A request then succeeds without restarting the app |
 | `script/test-android-artifacts` | ✅ `necto-android` declares no permission. 24 packaged panel files equal the iOS ones. Only the debug sample is debuggable |
 
-**Not verified on a device.** An emulator's ADB transport is not USB, so the
-USB path has not been checked with this connection yet.
+Repeated over USB on a Samsung Galaxy S25+ (`SM-S936N`, Android 17, API 37):
+`script/test-android-sample` and `script/test-android-security` both pass, with the
+target appearing as `android:<serial>`.
 
 ## Earlier device checks
 
