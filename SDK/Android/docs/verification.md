@@ -10,7 +10,7 @@ What was checked, and how to check it again. Update it when behaviour changes.
 | --- | --- | --- |
 | necto-core | 28 | Protocol models and JSON, schema validation, the shipped panel manifests, SDK runtime, plugin behaviour. The runtime tests feed it a hostile peer: frames outside 1 byte to 64 KiB, nesting past 64, invalid UTF-8, trailing JSON, a stalled frame, a silent handshake, an oversized handshake answer, long or duplicate request IDs and more than 32 active requests. Each closes the session, and the next connection works |
 | necto-okhttp | 7 | Request and response capture, capped large bodies, failures and `RuntimeException`s, streams that are not held back, bodies closed unread, large uploads |
-| necto-android | 9 (Robolectric) | UI Control on Views and Compose: listing with labels, test tags, values and secure fields; tap, text input (replace and append) and swipe on Compose; a touch-transparent full-window overlay does not hide content, while a clickable one does. The frame rate is left out until a full second has been measured |
+| necto-android | 12 (9 Robolectric) | UI Control on Views and Compose: listing with labels, test tags, values and secure fields; tap, text input (replace and append) and swipe on Compose; a touch-transparent full-window overlay does not hide content, while a clickable one does. The frame rate is left out until a full second has been measured. DataStore Preferences: a Long a JSON number would round (2^53 and beyond) is shown read-only and not written back rounded |
 
 The overlay test fails when the hit test treats every visible view as a blocker.
 

@@ -106,6 +106,9 @@ public class NectoDataStorePreferencesPlugin(
         /** Enough of a value to recognise a row by. */
         internal const val PREVIEW_LIMIT: Int = 120
 
+        // JSON numbers are doubles, which hold every integer only below 2^53.
+        private const val MAX_EXACT_INTEGER: Long = 9_007_199_254_740_992L
+
         private fun invalid(message: String) = NectoBridgeError(NectoBridgeErrorCode.INVALID_INPUT, message)
 
         private fun requiredKey(input: NectoJsonValue): String =
@@ -129,11 +132,14 @@ public class NectoDataStorePreferencesPlugin(
 
         /**
          * Named for the editor the panel opens: it knows Bool, Int, Double and Array. A Long
-         * edits as an Int and a Float as a Double; [write] keeps the stored type.
+         * edits as an Int and a Float as a Double; [write] keeps the stored type. A Long a
+         * double would round is named for itself, which the panel leaves read-only rather
+         * than saving the rounded number back.
          */
         internal fun typeName(value: Any?): String = when (value) {
             is Boolean -> "Bool"
-            is Int, is Long -> "Int"
+            is Int -> "Int"
+            is Long -> if (fitsJsonNumber(value)) "Int" else "Long"
             is Float, is Double -> "Double"
             is Set<*> -> "Array"
             is String -> "String"
@@ -168,6 +174,9 @@ public class NectoDataStorePreferencesPlugin(
          */
         internal fun write(preferences: MutablePreferences, key: String, value: NectoJsonValue, hint: String?, existing: Any?) {
             if (existing is ByteArray) throw invalid("Binary values cannot be edited")
+            if (existing is Long && !fitsJsonNumber(existing)) {
+                throw invalid("$existing cannot be edited: a JSON number would round it")
+            }
             removeNamed(preferences, key)
             when (value) {
                 is NectoJsonValue.Bool -> preferences[booleanPreferencesKey(key)] = value.value
@@ -199,8 +208,14 @@ public class NectoDataStorePreferencesPlugin(
             }
         }
 
+        private fun fitsJsonNumber(value: Long): Boolean = value > -MAX_EXACT_INTEGER && value < MAX_EXACT_INTEGER
+
+        /** At 2^53 and beyond, the number that arrived may already be a rounded one. */
         private fun integerOrThrow(number: Double, integral: Boolean): Double {
             if (!integral) throw invalid("'$number' is not an integer")
+            if (kotlin.math.abs(number) >= MAX_EXACT_INTEGER.toDouble()) {
+                throw invalid("${number.toLong()} is not a value an Int can hold")
+            }
             return number
         }
     }
