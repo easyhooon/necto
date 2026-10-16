@@ -55,5 +55,7 @@ repeated over the new connection.
 - Dialogs, popups and bottom sheets live in other windows and are not reached by UI
   Control.
 - An app that is not in the foreground has no UI Control targets.
-- `files.write` is bounded by the 64 KiB inbound frame.
+- `files.write` is bounded by the 64 KiB inbound frame. On a Galaxy S25+, 32 KiB and
+  60 KiB writes succeed; a 100 KiB write closes the session with `PROVIDER_FAILED`, and
+  the target reconnects in under a second.
 - One session is served at a time.
