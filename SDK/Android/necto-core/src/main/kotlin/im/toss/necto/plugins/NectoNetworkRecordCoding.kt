@@ -52,9 +52,11 @@ public object NectoNetworkRecordCoding {
 
     /** A command the developer can paste into a terminal to repeat the request. */
     internal fun curl(record: NectoNetworkRecord): String {
-        val parts = mutableListOf("curl -X ${record.method}", "'${record.url}'")
+        // Every part comes from the app's traffic, so every part is quoted: a URL with a
+        // quote in it must not end the argument and run as a command when pasted.
+        val parts = mutableListOf("curl -X '${escaped(record.method)}'", "'${escaped(record.url)}'")
         for (key in record.requestHeaders.keys.sorted()) {
-            parts += "-H '$key: ${escaped(record.requestHeaders[key].orEmpty())}'"
+            parts += "-H '${escaped(key)}: ${escaped(record.requestHeaders[key].orEmpty())}'"
         }
         record.requestBody?.text?.let { parts += "--data-raw '${escaped(it)}'" }
         return parts.joinToString(" \\\n  ")

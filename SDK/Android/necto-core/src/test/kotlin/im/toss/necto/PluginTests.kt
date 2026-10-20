@@ -10,6 +10,8 @@ import im.toss.necto.model.jsonOf
 import im.toss.necto.plugins.NectoControlGeometry
 import im.toss.necto.plugins.NectoFilesPlugin
 import im.toss.necto.plugins.NectoMetric
+import im.toss.necto.plugins.NectoNetworkRecord
+import im.toss.necto.plugins.NectoNetworkRecordCoding
 import im.toss.necto.plugins.NectoPerformancePlugin
 import im.toss.necto.plugins.NectoPerformanceReading
 import im.toss.necto.plugins.NectoPerformanceSampling
@@ -99,6 +101,27 @@ class PluginTests {
         assertEquals("outside the root", File(outside, "keep.txt").readText())
         outside.deleteRecursively()
         Unit
+    }
+
+    /** Pasted into a shell, the command must hand curl the app's values, never run them. */
+    @Test
+    fun curlQuotesEveryPartTheAppSupplied() {
+        val marker = File(directory, "ran")
+        val injected = "'; touch ${marker.path}; '"
+        val record = NectoNetworkRecord(
+            "r", "GET$injected", "https://example.com/a$injected", 1.0, NectoNetworkRecord.State.COMPLETED,
+            requestHeaders = mapOf("X-Name$injected" to "v$injected"),
+        )
+        val command = NectoNetworkRecordCoding.curl(record).replaceFirst("curl", "printf '%s\\n'")
+        val process = ProcessBuilder("sh", "-c", command).redirectErrorStream(true).start()
+        val arguments = process.inputStream.bufferedReader().readLines()
+        assertEquals(0, process.waitFor())
+
+        assertFalse(marker.exists())
+        assertEquals(
+            listOf("-X", "GET$injected", "https://example.com/a$injected", "-H", "X-Name$injected: v$injected"),
+            arguments,
+        )
     }
 
     @Test
