@@ -225,9 +225,7 @@ public actor NectoConnectionCenter {
     private func watchAndroid(_ adb: any NectoADB) async {
         guard let directory = androidSocketDirectory ?? Self.makeAndroidSocketDirectory() else { return }
         androidSocketDirectory = directory
-        // Forwards a run that crashed or was killed left behind point at sockets nobody
-        // listens on any more.
-        await adb.removeForwards(prefix: Self.androidSocketDirectoryPrefix)
+        await removeAbandonedForwards(through: adb)
 
         while !Task.isCancelled {
             if let serials = try? await adb.devices() {
@@ -252,22 +250,73 @@ public actor NectoConnectionCenter {
 
     /// Forwards apps found or found under a new name, and lets go of the ones gone.
     private func follow(_ found: [AndroidEndpoint: String], keeping unread: Set<String>, through adb: any NectoADB) async {
+        // A restarted adb server forgets every forward while the apps keep their names,
+        // so what it holds is checked, not only what was asked of it.
+        if let held = try? await adb.forwards() {
+            let paths = Set(held.map(\.socketPath))
+            for endpoint in androidForwards.keys where !paths.contains(endpoint.socketPath) {
+                androidForwards.removeValue(forKey: endpoint)
+            }
+        }
         for (endpoint, name) in found where androidForwards[endpoint] != name {
+            guard !Task.isCancelled else { return }
             do {
                 try await adb.forward(serial: endpoint.serial, socketPath: endpoint.socketPath, name: name)
             } catch {
                 continue
             }
-            guard !Task.isCancelled else { return }
+            // Recorded before the check below, so stop() still knows to remove it.
             androidForwards[endpoint] = name
+            guard !Task.isCancelled else { return }
             startProbe(.android(endpoint))
         }
         for endpoint in androidForwards.keys where found[endpoint] == nil && !unread.contains(endpoint.serial) {
+            guard !Task.isCancelled else { return }
             androidForwards.removeValue(forKey: endpoint)
             probes.removeValue(forKey: .android(endpoint))?.cancel()
             removeConnections { $0.id == endpoint.connectionID }
             await adb.removeForward(serial: endpoint.serial, socketPath: endpoint.socketPath)
         }
+    }
+
+    /// Forwards and directories a run that crashed or was killed left behind. Another
+    /// Necto may be running beside this one, so only a run whose process is gone counts.
+    private func removeAbandonedForwards(through adb: any NectoADB) async {
+        guard let held = try? await adb.forwards() else { return }
+        for (serial, path) in held {
+            guard let directory = Self.abandonedAndroidSocketDirectory(holding: path) else { continue }
+            await adb.removeForward(serial: serial, socketPath: path)
+            Self.removeAndroidSocketDirectory(directory)
+        }
+    }
+
+    /// The directory of [path] when it is one of Necto's and the run that made it is gone.
+    ///
+    /// Any program that talks to the adb server can add a forward, so the path is matched
+    /// whole, `necto-adb.<pid>.<6 characters>/<n>.sock` directly in the temporary
+    /// directory, and nothing like `..` can lead elsewhere.
+    static func abandonedAndroidSocketDirectory(holding path: String) -> String? {
+        guard path.hasPrefix(androidSocketDirectoryPrefix),
+              let match = path.dropFirst(androidSocketDirectoryPrefix.count)
+                .wholeMatch(of: /([0-9]{1,9})\.[A-Za-z0-9]{6}\/[0-9]{1,9}\.sock/),
+              let pid = Int32(match.output.1),
+              pid != getpid(), kill(pid, 0) != 0, errno == ESRCH
+        else { return nil }
+        return URL(filePath: path).deletingLastPathComponent().path
+    }
+
+    /// Removes the sockets in one of Necto's directories, then the directory itself.
+    /// Nothing is removed recursively: a directory holding anything else stays.
+    private static func removeAndroidSocketDirectory(_ directory: String) {
+        var info = stat()
+        guard lstat(directory, &info) == 0, info.st_mode & S_IFMT == S_IFDIR, info.st_uid == getuid(),
+              let names = try? FileManager.default.contentsOfDirectory(atPath: directory) else { return }
+        for name in names where name.wholeMatch(of: /[0-9]{1,9}\.sock/) != nil {
+            var socket = stat()
+            let path = directory + "/" + name
+            if lstat(path, &socket) == 0, socket.st_mode & S_IFMT == S_IFSOCK { unlink(path) }
+        }
+        rmdir(directory)
     }
 
     /// One socket path per app on a device, kept for as long as Necto runs, so an app
@@ -285,8 +334,9 @@ public actor NectoConnectionCenter {
 
     static let androidSocketDirectoryPrefix = NSTemporaryDirectory() + "necto-adb."
 
+    /// `necto-adb.<pid>.XXXXXX`: the pid tells a later run whether this one is still alive.
     private static func makeAndroidSocketDirectory() -> String? {
-        var template = Array((androidSocketDirectoryPrefix + "XXXXXX").utf8CString)
+        var template = Array((androidSocketDirectoryPrefix + "\(getpid()).XXXXXX").utf8CString)
         // mkdtemp creates it 0700.
         guard mkdtemp(&template) != nil else { return nil }
         return String(cString: template)

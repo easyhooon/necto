@@ -79,20 +79,28 @@ struct NectoAndroidConnectionTests {
         var peers: [String: Peer] = [:]
         var forwarded: [String] = []
         var removed: [String] = []
+        /// Serials whose next scan fails, as a device that answers late does.
+        var failing: Set<String> = []
         private var listeners: [String: UnixListener] = [:]
+        private var forwardSerials: [String: String] = [:]
 
         func set(serials: [String]) { self.serials = serials }
         func set(apps: [String: String], on serial: String) { self.apps[serial] = apps }
         func listen(_ peer: Peer, as name: String) { peers[name] = peer }
 
         func devices() async throws -> [String] { serials }
-        func endpoints(serial: String) async throws -> [String: String] { apps[serial] ?? [:] }
+        func endpoints(serial: String) async throws -> [String: String] {
+            if failing.remove(serial) != nil { throw POSIXError(.ETIMEDOUT) }
+            return apps[serial] ?? [:]
+        }
+        func failOnce(_ serial: String) { failing.insert(serial) }
 
         func forward(serial: String, socketPath: String, name: String) async throws {
             guard let peer = peers[name] else { throw POSIXError(.ECONNREFUSED) }
             listeners.removeValue(forKey: socketPath)?.close()
             let listener = try UnixListener(path: socketPath)
             listeners[socketPath] = listener
+            forwardSerials[socketPath] = serial
             forwarded.append(name)
             await peer.serve(listener.acceptor.sessions)
         }
@@ -102,9 +110,14 @@ struct NectoAndroidConnectionTests {
             removed.append(socketPath)
         }
 
-        func removeForwards(prefix: String) async {}
+        func forwards() async throws -> [(serial: String, socketPath: String)] {
+            listeners.keys.map { (forwardSerials[$0] ?? "", $0) }
+        }
 
-        func stop() { listeners.values.forEach { $0.close() }; listeners.removeAll() }
+        /// What a restarted adb server does: every forward is gone.
+        func restartServer() { listeners.values.forEach { $0.close() }; listeners.removeAll() }
+
+        func stop() { restartServer() }
     }
 
     private func name(_ seed: Character) -> String { "necto." + String(repeating: seed, count: 64) }
@@ -252,6 +265,98 @@ struct NectoAndroidConnectionTests {
         #expect(await androidPeer.count == 2)
     }
 
+    @Test("A device that answers late keeps its apps connected")
+    func keepsAppsOnALateAnswer() async throws {
+        let adb = FakeADB()
+        let one = Peer(app: "dev.necto.one")
+        await adb.listen(one, as: name("a"))
+        await adb.set(serials: ["phone"])
+        await adb.set(apps: ["dev.necto.one": name("a")], on: "phone")
+        let center = try center(adb)
+        await center.start()
+        defer { Task { await center.stop(); await one.stop(); await adb.stop() } }
+
+        try await wait { await center.connectedApps.count == 1 }
+        await adb.failOnce("phone")
+        try await wait { await adb.failing.isEmpty }
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(await center.connectedApps.count == 1)
+        #expect(await adb.removed.isEmpty)
+        #expect(await one.count == 1)
+    }
+
+    @Test("Forwards a restarted adb server forgot are made again")
+    func reforwardsAfterAServerRestart() async throws {
+        let adb = FakeADB()
+        let one = Peer(app: "dev.necto.one")
+        await adb.listen(one, as: name("a"))
+        await adb.set(serials: ["phone"])
+        await adb.set(apps: ["dev.necto.one": name("a")], on: "phone")
+        let center = try center(adb)
+        await center.start()
+        defer { Task { await center.stop(); await one.stop(); await adb.stop() } }
+
+        try await wait { await center.connectedApps.count == 1 }
+        await adb.restartServer()
+        await one.disconnect()
+        try await wait { await adb.forwarded.count == 2 }
+        try await wait { await one.count == 2 }
+        try await wait { await center.connectedApps.count == 1 }
+    }
+
+    @Test("Only a run whose process is gone counts as abandoned")
+    func abandonedDirectories() {
+        let prefix = NectoConnectionCenter.androidSocketDirectoryPrefix
+        // pid_max on macOS is 99999, so this pid cannot be running.
+        #expect(NectoConnectionCenter.abandonedAndroidSocketDirectory(holding: prefix + "999999.abc123/1.sock")
+            == prefix + "999999.abc123")
+        #expect(NectoConnectionCenter.abandonedAndroidSocketDirectory(holding: prefix + "\(getpid()).abc123/1.sock") == nil)
+        // launchd: running, and owned by another user.
+        #expect(NectoConnectionCenter.abandonedAndroidSocketDirectory(holding: prefix + "1.abc123/1.sock") == nil)
+        #expect(NectoConnectionCenter.abandonedAndroidSocketDirectory(holding: "/tmp/other/1.sock") == nil)
+        #expect(NectoConnectionCenter.abandonedAndroidSocketDirectory(holding: prefix + "abc123/1.sock") == nil)
+        // A forward anyone could add must not lead the cleanup out of Necto's directory.
+        for escape in ["999999.abc123/../../../Users/x/1.sock", "999999.abc123/1.sock/../..", "999999.abc123/x/1.sock",
+                       "999999.abc12/1.sock", "999999.abc123/1.socket"] {
+            #expect(NectoConnectionCenter.abandonedAndroidSocketDirectory(holding: prefix + escape) == nil)
+        }
+    }
+
+    /// A stand-in adb: answers by the command it gets, as written in [script].
+    private func fakeADB(_ script: String) throws -> (NectoADBClient, String) {
+        let directory = "/tmp/necto-fake-adb-" + UUID().uuidString
+        try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: false)
+        let path = directory + "/adb"
+        FileManager.default.createFile(atPath: path, contents: Data(("#!/bin/sh\n" + script).utf8),
+                                       attributes: [.posixPermissions: 0o755])
+        return (NectoADBClient(executable: path), directory)
+    }
+
+    @Test("adb is asked on localhost, and a failed command is not an empty answer")
+    func adbProcessWiring() async throws {
+        let (failing, first) = try fakeADB("""
+            [ "$1 $2" = "-H localhost" ] || exit 9
+            exit 1
+            """)
+        defer { try? FileManager.default.removeItem(atPath: first) }
+        await #expect(throws: POSIXError.self) { _ = try await failing.devices() }
+        await #expect(throws: POSIXError.self) { _ = try await failing.endpoints(serial: "phone") }
+
+        let good = name("a").replacingOccurrences(of: "a", with: "0")
+        let (cut, second) = try fakeADB("""
+            case "$*" in *shell*) echo "dev.necto.one \(good)";; esac
+            """)
+        defer { try? FileManager.default.removeItem(atPath: second) }
+        // A scan that stopped before its marker is incomplete, not a device without apps.
+        await #expect(throws: POSIXError.self) { _ = try await cut.endpoints(serial: "phone") }
+
+        let (whole, third) = try fakeADB("""
+            case "$*" in *shell*) echo "dev.necto.one \(good)"; echo \(NectoADBClient.scanDone);; esac
+            """)
+        defer { try? FileManager.default.removeItem(atPath: third) }
+        #expect(try await whole.endpoints(serial: "phone") == ["dev.necto.one": good])
+    }
+
     @Test("adb output is read strictly: only authorized devices and well-formed names")
     func parsesADB() {
         #expect(NectoADBClient.authorizedSerials("""
@@ -276,6 +381,11 @@ struct NectoAndroidConnectionTests {
         #expect(!NectoADBClient.isEndpointName(good + "\n"))
         #expect(!NectoADBClient.isPackageName("a.b\n"))
         #expect(!NectoADBClient.isPackageName("a.b; rm -rf /"))
+        let forwards = NectoADBClient.forwards("""
+            phone localfilesystem:/tmp/x/1.sock localabstract:necto.abc
+            phone tcp:5000 localabstract:other
+            """)
+        #expect(forwards.map(\.socketPath) == ["/tmp/x/1.sock"])
         #expect(!NectoADBClient.isEndpointName("necto.\(String(repeating: "A", count: 64))"))
     }
 

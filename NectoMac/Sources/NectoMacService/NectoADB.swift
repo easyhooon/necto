@@ -14,9 +14,8 @@ protocol NectoADB: Sendable {
     /// Forwards the Unix socket at [socketPath] to the device's abstract socket [name].
     func forward(serial: String, socketPath: String, name: String) async throws
     func removeForward(serial: String, socketPath: String) async
-    /// Removes every forward whose local socket starts with [prefix], such as those an
-    /// earlier run left behind.
-    func removeForwards(prefix: String) async
+    /// The local socket paths the adb server forwards, by serial.
+    func forwards() async throws -> [(serial: String, socketPath: String)]
 }
 
 /// Runs the adb tool from the Android SDK against the local adb server.
@@ -64,14 +63,23 @@ actor NectoADBClient: NectoADB {
         local = local.filter { listed.contains($0.key) }
         var result: [String] = []
         for serial in listed {
-            if local[serial] == nil { local[serial] = try await isLocal(serial) }
+            if local[serial] == nil {
+                // A device that cannot say yet is asked again next time, and holds up no
+                // other device meanwhile.
+                guard let isLocal = try? await isLocal(serial) else { continue }
+                local[serial] = isLocal
+            }
             if local[serial] == true { result.append(serial) }
         }
         return result
     }
 
     func endpoints(serial: String) async throws -> [String: String] {
-        Self.endpoints(try await adb(["-s", serial, "shell", Self.endpointScript], timeoutMilliseconds: 10_000))
+        let output = try await adb(["-s", serial, "shell", Self.endpointScript], timeoutMilliseconds: 10_000)
+        // The shell exits with its last command's status, so only the marker shows that
+        // the scan ran to its end. Without it the answer is incomplete, not empty.
+        guard output.hasSuffix(Self.scanDone + "\n") else { throw POSIXError(.EIO) }
+        return Self.endpoints(output)
     }
 
     func forward(serial: String, socketPath: String, name: String) async throws {
@@ -87,13 +95,8 @@ actor NectoADBClient: NectoADB {
         _ = try? await adb(["-s", serial, "forward", "--remove", "localfilesystem:" + socketPath])
     }
 
-    func removeForwards(prefix: String) async {
-        guard let list = try? await adb(["forward", "--list"]) else { return }
-        for line in list.split(separator: "\n") {
-            let fields = line.split(separator: " ").map(String.init)
-            guard fields.count == 3, fields[1].hasPrefix("localfilesystem:" + prefix) else { continue }
-            await removeForward(serial: fields[0], socketPath: String(fields[1].dropFirst("localfilesystem:".count)))
-        }
+    func forwards() async throws -> [(serial: String, socketPath: String)] {
+        Self.forwards(try await adb(["forward", "--list"]))
     }
 
     /// A cable or a real emulator: wireless ADB reaches the phone from the network, and
@@ -106,17 +109,21 @@ actor NectoADBClient: NectoADB {
         return try await adb(["-s", serial, "get-devpath"]).hasPrefix("usb:")
     }
 
+    /// A failed command throws: an empty answer from a device that went offline must not
+    /// read as a device with no apps.
     private func adb(_ arguments: [String], timeoutMilliseconds: Int = 5_000) async throws -> String {
         let output = try await NectoProcessRunner.run(
             executable, arguments: Self.server + arguments, environment: Self.environment,
             timeoutMilliseconds: timeoutMilliseconds, maximumOutputBytes: 1_048_576
         )
+        guard output.exitCode == 0 else { throw POSIXError(.EIO) }
         return String(decoding: output.stdout, as: UTF8.self)
     }
 
     /// The server on this Mac, never one named by the environment: that could be a server
-    /// on another machine.
-    private static let server = ["-H", "127.0.0.1", "-P", "5037"]
+    /// on another machine. adb starts a server only for `localhost`; for `127.0.0.1` it
+    /// refuses, as for any remote host.
+    private static let server = ["-H", "localhost", "-P", "5037"]
 
     private static var environment: [String: String] {
         var environment = ProcessInfo.processInfo.environment
@@ -133,12 +140,23 @@ actor NectoADBClient: NectoADB {
         + #"for p in $(ps -A -o NAME= | cut -d: -f1 | sort -u); do case "$k" in *" $p "*) "#
         + #"e=$(run-as "$p" cat no_backup/necto-endpoint 2>/dev/null) || continue; h=${e#necto.}; "#
         + #"[ "$e" = "necto.$h" ] && [ ${#h} -eq 64 ] && [ -z "$(printf %s "$h" | tr -d 0-9a-f)" ] && echo "$p $e";; "#
-        + #"esac; done"#
+        + #"esac; done; echo "# + scanDone
+
+    static let scanDone = "necto-scan-done"
 
     static func authorizedSerials(_ output: String) -> [String] {
         output.split(separator: "\n").dropFirst().compactMap { line in
             let fields = line.split(whereSeparator: \.isWhitespace)
             return fields.count == 2 && fields[1] == "device" ? String(fields[0]) : nil
+        }
+    }
+
+    /// Lines of `<serial> localfilesystem:<path> <remote>`, keeping local socket forwards.
+    static func forwards(_ output: String) -> [(serial: String, socketPath: String)] {
+        output.split(separator: "\n").compactMap { line in
+            let fields = line.split(separator: " ").map(String.init)
+            guard fields.count == 3, fields[1].hasPrefix("localfilesystem:") else { return nil }
+            return (fields[0], String(fields[1].dropFirst("localfilesystem:".count)))
         }
     }
 
