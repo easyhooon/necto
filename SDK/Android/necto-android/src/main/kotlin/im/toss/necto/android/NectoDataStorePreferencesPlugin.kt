@@ -177,6 +177,13 @@ public class NectoDataStorePreferencesPlugin(
             if (existing is Long && !fitsJsonNumber(existing)) {
                 throw invalid("$existing cannot be edited: a JSON number would round it")
             }
+            // The app reads an Int key as an Int: a Long stored there would throw
+            // ClassCastException in the app, not here.
+            if ((existing is Int || (existing == null && hint == "Int")) && value is NectoJsonValue.Number &&
+                value.value !in Int.MIN_VALUE.toDouble()..Int.MAX_VALUE.toDouble()
+            ) {
+                throw invalid("${value.value.toLong()} is not a value an Int can hold")
+            }
             removeNamed(preferences, key)
             when (value) {
                 is NectoJsonValue.Bool -> preferences[booleanPreferencesKey(key)] = value.value

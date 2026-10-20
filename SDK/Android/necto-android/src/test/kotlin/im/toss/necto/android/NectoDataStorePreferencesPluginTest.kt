@@ -60,6 +60,21 @@ class NectoDataStorePreferencesPluginTest {
         }
     }
 
+    /** Stored as a Long, it would throw ClassCastException where the app reads an Int. */
+    @Test
+    fun refusesAnIntKeyAValueOutsideTheIntRange() {
+        val key = intPreferencesKey("count")
+        val preferences = mutablePreferencesOf(key to 1)
+        for (outside in listOf(2_147_483_648.0, -2_147_483_649.0)) {
+            assertInvalid { plugin.write(preferences, "count", NectoJsonValue.Number(outside), "Int", 1) }
+        }
+        assertEquals(1, preferences[key])
+        assertInvalid { plugin.write(mutablePreferencesOf(), "fresh", NectoJsonValue.Number(2_147_483_648.0), "Int", null) }
+
+        plugin.write(preferences, "count", NectoJsonValue.Number(2_147_483_647.0), "Int", 1)
+        assertEquals(Int.MAX_VALUE, preferences[key])
+    }
+
     private fun assertInvalid(block: () -> Unit) {
         val error = assertThrows(NectoBridgeError::class.java, block)
         assertEquals(NectoBridgeErrorCode.INVALID_INPUT, error.code)
