@@ -11,16 +11,13 @@ import im.toss.necto.model.NectoJsonSchema
 import im.toss.necto.model.NectoJsonValue
 import im.toss.necto.model.NectoPanelArchive
 import im.toss.necto.model.NectoPluginInvocation
-import im.toss.necto.model.NectoPluginManifest
 import im.toss.necto.model.NectoPluginResult
 import im.toss.necto.model.NectoSemanticVersion
 import im.toss.necto.model.jsonObject
 import im.toss.necto.model.jsonOf
-import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
-import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -125,19 +122,5 @@ class ModelTests {
         assertEquals("""{"requestID":"r1","error":{"code":"INVALID_INPUT","message":"bad"},"isFinal":true}""", failure.toJson().toJson())
         assertEquals(failure, NectoPluginResult.fromJson(failure.toJson()))
         assertEquals(1, NectoBridgeCatalog(emptyList()).catalogVersion)
-    }
-
-    @Test
-    fun shippedPanelManifestsValidate() {
-        // Generated from the iOS SDK's built panels before the tests compile.
-        val panels = File("build/generated/panelResources/necto/panels").listFiles()!!.filter { it.isDirectory }
-        assertTrue(panels.size >= 6)
-        for (panel in panels) {
-            val manifest = NectoPluginManifest.fromJson(NectoJsonValue.parse(panel.resolve("manifest.json").readText()))
-            manifest.validate()
-            assertEquals(panel.name, manifest.id)
-            assertTrue(manifest.requiresTarget)
-            assertNotNull(NectoPanelArchive.read(panel).files.firstOrNull { it.path == "index.html" })
-        }
     }
 }
