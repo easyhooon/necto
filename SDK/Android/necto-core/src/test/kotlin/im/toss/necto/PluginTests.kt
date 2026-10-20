@@ -86,6 +86,22 @@ class PluginTests {
     }
 
     @Test
+    fun deletingAFolderRemovesLinksWithoutEnteringThem() = runBlocking {
+        val outside = Files.createTempDirectory("necto-outside").toFile()
+        File(outside, "keep.txt").writeText("outside the root")
+        val folder = File(directory, "cache").apply { mkdirs() }
+        Files.createSymbolicLink(File(folder, "escape").toPath(), outside.toPath())
+        Files.createSymbolicLink(File(folder, "escape.txt").toPath(), File(outside, "keep.txt").toPath())
+
+        files.call("files.delete", input("root" to "files", "path" to "cache"))
+
+        assertFalse(folder.exists())
+        assertEquals("outside the root", File(outside, "keep.txt").readText())
+        outside.deleteRecursively()
+        Unit
+    }
+
+    @Test
     fun textPreviewSurvivesACutMultibyteCharacter() {
         val bytes = "가나".toByteArray()
         assertEquals("가", NectoFilesPlugin.decodeUtf8Head(bytes.copyOf(4), isComplete = false))
