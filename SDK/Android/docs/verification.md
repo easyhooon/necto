@@ -25,9 +25,8 @@ connects the two. The scripts below then run against it. The repository's
 With Necto finding the app through ADB itself, `script/test-android-sample` and
 `script/test-android-security` pass over USB on a Samsung Galaxy S25+ (`SM-S936N`,
 Android 17, API 37). Necto connected 3.7 seconds after it started with the app already
-running, and 6.2 seconds after the app was restarted. A forward a killed Necto left
-behind is removed when Necto next starts. The emulator has not been run again since
-the change.
+running, and 6.2 seconds after the app was restarted. On start, Necto removes forwards
+left by a run that was killed. The emulator has not been run again since the change.
 
 ## Known limitations
 

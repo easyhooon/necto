@@ -126,13 +126,9 @@ actor NectoADBClient: NectoADB {
         return environment
     }
 
-    /// Asks only running third-party apps, since only a running app listens. One shell
-    /// for every app keeps a scan near a second even with hundreds installed. The script
-    /// is fixed: nothing from the host is put into it.
-    ///
-    /// Each app writes its own endpoint file, so a debuggable app could write a line
-    /// break and a second line naming another app. A file is printed only when it holds
-    /// exactly one name and nothing else.
+    /// Asks running third-party apps only, in one shell, so a scan stays under a second.
+    /// A file is printed only when it holds exactly one name: an app writes its own, and
+    /// a second line could name another app.
     static let endpointScript = #"k=" $(pm list packages -3 | cut -d: -f2 | tr '\n' ' ') "; "#
         + #"for p in $(ps -A -o NAME= | cut -d: -f1 | sort -u); do case "$k" in *" $p "*) "#
         + #"e=$(run-as "$p" cat no_backup/necto-endpoint 2>/dev/null) || continue; h=${e#necto.}; "#
