@@ -268,6 +268,13 @@ struct NectoAndroidConnectionTests {
             bad;name \(good)
             dev.necto.three \(good) extra
             """) == ["dev.necto.one": good])
+        // An app writing a second line into its own file cannot file a name under
+        // another package, whichever line ending it uses.
+        #expect(NectoADBClient.endpoints("dev.evil.app \(good)\ndev.victim.app \(good)\ndev.evil.app \(good)\n")
+            == ["dev.victim.app": good])
+        #expect(NectoADBClient.endpoints("dev.evil.app \(good)\rdev.victim.app \(good)\n").isEmpty)
+        #expect(!NectoADBClient.isEndpointName(good + "\n"))
+        #expect(!NectoADBClient.isPackageName("a.b\n"))
         #expect(!NectoADBClient.isPackageName("a.b; rm -rf /"))
         #expect(!NectoADBClient.isEndpointName("necto.\(String(repeating: "A", count: 64))"))
     }

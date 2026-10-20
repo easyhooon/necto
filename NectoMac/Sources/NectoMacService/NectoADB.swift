@@ -129,9 +129,15 @@ actor NectoADBClient: NectoADB {
     /// Asks only running third-party apps, since only a running app listens. One shell
     /// for every app keeps a scan near a second even with hundreds installed. The script
     /// is fixed: nothing from the host is put into it.
+    ///
+    /// Each app writes its own endpoint file, so a debuggable app could write a line
+    /// break and a second line naming another app. A file is printed only when it holds
+    /// exactly one name and nothing else.
     static let endpointScript = #"k=" $(pm list packages -3 | cut -d: -f2 | tr '\n' ' ') "; "#
         + #"for p in $(ps -A -o NAME= | cut -d: -f1 | sort -u); do case "$k" in *" $p "*) "#
-        + #"e=$(run-as "$p" cat no_backup/necto-endpoint 2>/dev/null) && echo "$p $e";; esac; done"#
+        + #"e=$(run-as "$p" cat no_backup/necto-endpoint 2>/dev/null) || continue; h=${e#necto.}; "#
+        + #"[ "$e" = "necto.$h" ] && [ ${#h} -eq 64 ] && [ -z "$(printf %s "$h" | tr -d 0-9a-f)" ] && echo "$p $e";; "#
+        + #"esac; done"#
 
     static func authorizedSerials(_ output: String) -> [String] {
         output.split(separator: "\n").dropFirst().compactMap { line in
@@ -140,22 +146,27 @@ actor NectoADBClient: NectoADB {
         }
     }
 
-    /// Lines of `<package> <name>`. Both come from the device, so both are checked.
+    /// Lines of `<package> <name>`. Both come from the device, so both are checked, and
+    /// a package listed twice is dropped: one of the two lines was not its own.
     static func endpoints(_ output: String) -> [String: String] {
         var result: [String: String] = [:]
-        for line in output.split(whereSeparator: \.isNewline) {
-            let fields = line.split(separator: " ").map(String.init)
+        var repeated: Set<String> = []
+        // Only "\n" ends a line: the script prints nothing else, and a "\r" left inside a
+        // field must fail the checks below rather than start a line of its own.
+        for line in output.split(separator: "\n", omittingEmptySubsequences: true) {
+            let fields = line.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
             guard fields.count == 2, isPackageName(fields[0]), isEndpointName(fields[1]) else { continue }
-            result[fields[0]] = fields[1]
+            if result.updateValue(fields[1], forKey: fields[0]) != nil { repeated.insert(fields[0]) }
         }
+        for package in repeated { result.removeValue(forKey: package) }
         return result
     }
 
     static func isPackageName(_ value: String) -> Bool {
-        value.range(of: "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$", options: .regularExpression) != nil
+        value.wholeMatch(of: /[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+/) != nil
     }
 
     static func isEndpointName(_ value: String) -> Bool {
-        value.range(of: "^necto\\.[a-f0-9]{64}$", options: .regularExpression) != nil
+        value.wholeMatch(of: /necto\.[a-f0-9]{64}/) != nil
     }
 }
