@@ -32,6 +32,7 @@ import im.toss.necto.plugins.NectoControlGeometry
 import im.toss.necto.plugins.NectoControlTarget
 import im.toss.necto.plugins.NectoPoint
 import im.toss.necto.plugins.NectoRect
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -482,29 +483,59 @@ internal class NectoAndroidControlRuntime(private val activity: () -> Activity?)
     /** One tap with every contact down together, then up together. */
     private suspend fun tap(activity: Activity, points: List<NectoPoint>) {
         val downTime = SystemClock.uptimeMillis()
-        points.indices.forEach { count ->
-            val action = if (count == 0) MotionEvent.ACTION_DOWN else pointerAction(MotionEvent.ACTION_POINTER_DOWN, count)
-            dispatch(activity, downTime, action, points.take(count + 1))
-        }
-        delay(TAP_HOLD_MS)
-        for (count in points.size downTo 1) {
-            val action = if (count == 1) MotionEvent.ACTION_UP else pointerAction(MotionEvent.ACTION_POINTER_UP, count - 1)
-            dispatch(activity, downTime, action, points.take(count))
+        var down = emptyList<NectoPoint>()
+        cancellingTouches(activity, downTime, { down }) {
+            points.indices.forEach { count ->
+                val action = if (count == 0) MotionEvent.ACTION_DOWN else pointerAction(MotionEvent.ACTION_POINTER_DOWN, count)
+                down = points.take(count + 1)
+                dispatch(activity, downTime, action, down)
+            }
+            delay(TAP_HOLD_MS)
+            for (count in points.size downTo 1) {
+                val action = if (count == 1) MotionEvent.ACTION_UP else pointerAction(MotionEvent.ACTION_POINTER_UP, count - 1)
+                dispatch(activity, downTime, action, points.take(count))
+                down = points.take(count - 1)
+            }
         }
     }
 
     /** A single finger moving from [start] to [end], one move per frame. */
     private suspend fun drag(activity: Activity, start: NectoPoint, end: NectoPoint, durationMs: Long) {
         val downTime = SystemClock.uptimeMillis()
-        dispatch(activity, downTime, MotionEvent.ACTION_DOWN, listOf(start))
-        val steps = maxOf(2, (durationMs / FRAME_MS).toInt())
-        for (step in 1..steps) {
-            delay(FRAME_MS)
-            val fraction = step.toDouble() / steps
-            val point = NectoPoint(start.x + (end.x - start.x) * fraction, start.y + (end.y - start.y) * fraction)
-            dispatch(activity, downTime, MotionEvent.ACTION_MOVE, listOf(point))
+        var down = emptyList<NectoPoint>()
+        cancellingTouches(activity, downTime, { down }) {
+            down = listOf(start)
+            dispatch(activity, downTime, MotionEvent.ACTION_DOWN, down)
+            val steps = maxOf(2, (durationMs / FRAME_MS).toInt())
+            for (step in 1..steps) {
+                delay(FRAME_MS)
+                val fraction = step.toDouble() / steps
+                down = listOf(NectoPoint(start.x + (end.x - start.x) * fraction, start.y + (end.y - start.y) * fraction))
+                dispatch(activity, downTime, MotionEvent.ACTION_MOVE, down)
+            }
+            dispatch(activity, downTime, MotionEvent.ACTION_UP, listOf(end))
+            down = emptyList()
         }
-        dispatch(activity, downTime, MotionEvent.ACTION_UP, listOf(end))
+    }
+
+    /**
+     * Runs a gesture, and when it is cancelled with contacts still [down], sends
+     * ACTION_CANCEL. Without it the view keeps them pressed, and a tap left held turns
+     * into a long press.
+     */
+    private suspend fun cancellingTouches(
+        activity: Activity,
+        downTime: Long,
+        down: () -> List<NectoPoint>,
+        gesture: suspend () -> Unit,
+    ) {
+        try {
+            gesture()
+        } catch (cancellation: CancellationException) {
+            val held = down()
+            if (held.isNotEmpty()) dispatch(activity, downTime, MotionEvent.ACTION_CANCEL, held)
+            throw cancellation
+        }
     }
 
     private fun pointerAction(action: Int, index: Int): Int = action or (index shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)

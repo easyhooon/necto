@@ -4,6 +4,7 @@ package im.toss.necto.android
 
 import android.app.Activity
 import android.os.Looper
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
@@ -37,8 +38,10 @@ import im.toss.necto.model.jsonOf
 import im.toss.necto.plugins.NectoControlTarget
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
@@ -97,6 +100,32 @@ class NectoAndroidControlRuntimeTest {
 
         perform("input", runtime.snapshot().single { it.label == "Name" }, "text" to jsonOf("necto"))
         assertEquals("necto", field.text.toString())
+    }
+
+    /** A tap cancelled while held must release the view, or it stays pressed and long-presses. */
+    @Test
+    fun aCancelledTapReleasesTheTouch() = runTest {
+        val actions = mutableListOf<Int>()
+        var longPressed = false
+        val button = Button(start()).apply {
+            text = "Hold"
+            setOnTouchListener { _, event -> actions += event.actionMasked; false }
+            setOnLongClickListener { longPressed = true; true }
+        }
+        show(button)
+        val target = runtime.snapshot().single { it.label == "Hold" }
+
+        val tap = launch { runtime.perform("tap", jsonObject("targetID" to jsonOf(target.id))) }
+        runCurrent()
+        assertEquals(listOf(MotionEvent.ACTION_DOWN), actions)
+        tap.cancel()
+        runCurrent()
+        idle()
+
+        assertEquals(listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_CANCEL), actions)
+        assertFalse(button.isPressed)
+        shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(2))
+        assertFalse(longPressed)
     }
 
     // MARK: Compose
