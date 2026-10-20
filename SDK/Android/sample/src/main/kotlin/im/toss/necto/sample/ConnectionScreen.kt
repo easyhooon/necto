@@ -57,7 +57,7 @@ fun ConnectionScreen() {
             }
             SectionFooter(
                 "Necto reaches this app through ADB, over USB on a device and the same way in an " +
-                    "emulator. Run `script/android-connect` on the Mac to forward the app's private socket.",
+                    "emulator. Open Necto on the Mac with the Android SDK installed.",
             )
         }
     }

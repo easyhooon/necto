@@ -22,10 +22,12 @@ connects the two. The scripts below then run against it. The repository's
 | `script/test-android-security` | A silent handshake is dropped after 5 seconds. Frames of 0 bytes, 64 KiB + 1 and 4 GiB are dropped, as are nesting past 64, a frame that stalls for 10 seconds, and 33 concurrent requests. A request then succeeds without restarting the app |
 | `script/test-android-artifacts` | `necto-android` declares no permission. `necto-core` carries no panels. Only the debug sample is debuggable |
 
-The connection and security checks passed on an Android 17 emulator
-(`sdk_gphone64_arm64`, API 37) and over USB on a Samsung Galaxy S25+ (`SM-S936N`,
-Android 17, API 37) while the shipped plugins were still part of this change. The
-scripts have since moved to `plugin-sample` and have not been run again.
+With Necto finding the app through ADB itself, `script/test-android-sample` and
+`script/test-android-security` pass over USB on a Samsung Galaxy S25+ (`SM-S936N`,
+Android 17, API 37). Necto connected 3.7 seconds after it started with the app already
+running, and 6.2 seconds after the app was restarted. A forward a killed Necto left
+behind is removed when Necto next starts. The emulator has not been run again since
+the change.
 
 ## Known limitations
 

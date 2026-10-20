@@ -140,10 +140,7 @@ final class NectoAppModel {
 
     let registry = NectoPluginRegistry(targetHandles: NectoAppModel.targetHandles)
 
-    private let connections = NectoConnectionCenter(
-        androidEndpoint: .fromEnvironment(ProcessInfo.processInfo.environment),
-        appleDiscoveryEnabled: ProcessInfo.processInfo.environment["NECTO_ANDROID_ONLY"] != "1"
-    )
+    private let connections = NectoConnectionCenter()
     private let storage = NectoPluginStorage()
     private let events = NectoPluginEventRouter()
     let diagnostics = NectoDiagnosticsLog()

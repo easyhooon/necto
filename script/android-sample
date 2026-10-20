@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Builds the Android sample and a separate Necto.app, installs the sample on a USB device
-# or a local emulator, and connects the two through script/android-connect.
+# or a local emulator, and runs that Necto until Ctrl-C. Necto finds the sample through
+# ADB itself, as it finds any debuggable app that carries the SDK.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -49,5 +50,22 @@ cli="$PWD/NectoMac/.build/debug/necto-cli"
 [[ -x "$host" && -x "$cli" ]] || { echo "Build first: run without --no-build." >&2; exit 1; }
 run install "$adb" -s "$serial" install -r SDK/Android/sample/build/outputs/apk/debug/sample-debug.apk
 run launch "$adb" -s "$serial" shell am start -W -n im.toss.necto.sample/.MainActivity
-exec script/android-connect "$serial" im.toss.necto.sample --adb "$adb" --host "$host" --cli "$cli" \
-    --state "$out/current-run.json" --log "$out/Logs/host.log"
+
+# A home of its own, so this Necto's settings and control socket leave the usual one alone.
+home="$(mktemp -d /tmp/necto-android.XXXXXX)"
+ANDROID_HOME="$sdk" CFFIXED_USER_HOME="$home" "$host" >"$out/Logs/host.log" 2>&1 &
+pid=$!
+trap 'kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null' EXIT INT TERM
+cat >"$out/current-run.json" <<JSON
+{
+  "home": "$home",
+  "serial": "$serial",
+  "applicationID": "im.toss.necto.sample",
+  "pid": $pid,
+  "cli": "$cli",
+  "adb": "$adb"
+}
+JSON
+echo "CLI: CFFIXED_USER_HOME=$home $cli device list --json"
+echo "Necto is running. Ctrl-C stops it."
+wait "$pid"

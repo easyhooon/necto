@@ -15,17 +15,21 @@ writes that name to the app's private `no_backup/necto-endpoint`. Only ADB reach
   from the shell and root users that adbd runs as.
 - In an app that is not debuggable, `start` logs a warning and does nothing.
 
-`script/android-connect` on the Mac does the rest. It refuses wireless ADB, reads the
-name, runs `adb forward localfilesystem:<private path> localabstract:<name>`, and starts
-Necto pointed at that path. It follows the app as it restarts and gets a new name.
+Necto on the Mac does the rest, alongside its iOS connections, when the Android SDK is
+installed. It finds `adb` through `ANDROID_HOME`, `ANDROID_SDK_ROOT` or
+`~/Library/Android/sdk`, and starts the local adb server if none is running. Then, every
+two seconds:
 
-```bash
-script/android-connect <serial> <application id> --adb <adb> --host <Necto> --cli <necto-cli> \
-    --state <run.json> --log <host.log>
-```
+- It lists authorized devices on a USB cable and real local emulators. Wireless ADB is
+  refused.
+- On each, it asks the running third-party apps for their name through `run-as`.
+- It forwards a private Unix socket to each name it finds (`adb forward
+  localfilesystem:<private path> localabstract:<name>`) and connects there. An app that
+  restarts under a new name is forwarded again; an app or device that goes away loses
+  its forward.
 
-`script/android-sample <serial>` builds the sample and Necto, installs the sample on a
-USB device or a local emulator, and calls `android-connect` with everything filled in.
+`script/android-sample <serial>` builds the sample and a separate Necto, installs the
+sample on a USB device or a local emulator, and runs that Necto until Ctrl-C.
 
 The device appears as `android:<serial>`, labelled `Android <version>`.
 

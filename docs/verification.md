@@ -142,7 +142,7 @@ script/android-sample <serial>
 ```
 
 It builds the Android sample and a separate Necto.app (`im.toss.necto.android-sample`),
-installs the sample, and keeps Necto connected to it through `script/android-connect`
+installs and launches the sample, and runs that Necto, which finds the sample through ADB,
 until Ctrl-C. While it runs, from another terminal:
 
 | Script | What it checks |

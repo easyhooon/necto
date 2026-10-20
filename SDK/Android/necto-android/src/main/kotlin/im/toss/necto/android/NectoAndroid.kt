@@ -22,8 +22,8 @@ import im.toss.necto.sdk.NectoSDK
  * }
  * ```
  *
- * The app then waits on a private Unix socket that only ADB can reach. On the Mac,
- * `script/android-connect` forwards it and starts Necto pointed at it.
+ * The app then waits on a private Unix socket that only ADB can reach. Necto on the Mac
+ * finds it through ADB and forwards a private socket of its own to it.
  *
  * Necto runs in debuggable builds only: a release build is never reachable through
  * `adb shell run-as`, which is how the host finds the socket, and it should not carry a
