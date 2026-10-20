@@ -104,10 +104,11 @@ public class NectoOkHttpInterceptor(private val reporter: NectoNetworkReporting)
             return response
         }
         val type = response.header("Content-Type") ?: body.contentType()?.toString()
-        val capturing = CapturingSource(body.source(), body.contentLength()) { bytes, byteCount ->
+        val capturing = CapturingSource(body.source(), body.contentLength()) { bytes, byteCount, error ->
             safely {
                 val captured = if (bytes.isEmpty()) null else NectoNetworkRecord.Body.of(bytes, type, byteCount = byteCount)
-                reporter.report(record(NectoNetworkRecord.State.COMPLETED, response = response, responseBody = captured))
+                val state = if (error == null) NectoNetworkRecord.State.COMPLETED else NectoNetworkRecord.State.FAILED
+                reporter.report(record(state, response = response, error = error, responseBody = captured))
             }
         }
         return response.newBuilder()
@@ -140,11 +141,14 @@ public class NectoOkHttpInterceptor(private val reporter: NectoNetworkReporting)
     }
 }
 
-/** Copies up to the capture limit of what the app reads, then reports once at EOF or close. */
+/**
+ * Copies up to the capture limit of what the app reads, then reports once: at EOF or
+ * close, or with the error when reading the body fails.
+ */
 private class CapturingSource(
     delegate: Source,
     private val declaredLength: Long,
-    private val onDone: (bytes: ByteArray, byteCount: Long) -> Unit,
+    private val onDone: (bytes: ByteArray, byteCount: Long, error: Throwable?) -> Unit,
 ) : ForwardingSource(delegate) {
     private val limit = NectoNetworkRecord.Body.CAPTURE_LIMIT.toLong()
     private val captured = Buffer()
@@ -152,7 +156,12 @@ private class CapturingSource(
     private val done = AtomicBoolean(false)
 
     override fun read(sink: Buffer, byteCount: Long): Long {
-        val read = super.read(sink, byteCount)
+        val read = try {
+            super.read(sink, byteCount)
+        } catch (error: Throwable) {
+            finish(error)
+            throw error
+        }
         if (read == -1L) {
             finish()
             return read
@@ -192,9 +201,9 @@ private class CapturingSource(
         }
     }
 
-    private fun finish() {
+    private fun finish(error: Throwable? = null) {
         if (!done.compareAndSet(false, true)) return
-        onDone(captured.readByteArray(), maxOf(count, declaredLength))
+        onDone(captured.readByteArray(), maxOf(count, declaredLength), error)
     }
 
     private companion object {

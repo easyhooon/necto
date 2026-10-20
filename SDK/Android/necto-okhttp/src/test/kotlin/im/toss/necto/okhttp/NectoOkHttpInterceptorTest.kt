@@ -81,6 +81,21 @@ class NectoOkHttpInterceptorTest {
         assertTrue(records.last().errorSummary!!.isNotEmpty())
     }
 
+    /** Closing a body whose read failed must not record the request as completed. */
+    @Test
+    fun aBodyThatFailsToReadIsReportedAsFailed() {
+        server.enqueue(
+            MockResponse().setBody("x".repeat(64 * 1024)).setSocketPolicy(SocketPolicy.DISCONNECT_DURING_RESPONSE_BODY),
+        )
+        val error = assertFailsWith<IOException> {
+            client.newCall(Request.Builder().url(server.url("/cut")).build()).execute().use { it.body!!.string() }
+        }
+        val last = records.last()
+        assertEquals(NectoNetworkRecord.State.FAILED, last.state)
+        assertEquals(200, last.statusCode)
+        assertEquals(error.message ?: error.toString(), last.errorSummary)
+    }
+
     @Test
     fun slowStreamsReachTheAppWithoutWaitingForTheCaptureLimit() {
         // 1 KB a second: waiting for 512 KB up front would take minutes.
