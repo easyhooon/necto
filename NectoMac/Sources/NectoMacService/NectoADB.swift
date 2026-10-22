@@ -24,7 +24,7 @@ protocol NectoADB: Sendable {
 /// `adb shell run-as` can read, which needs a debuggable app. Necto reads the name,
 /// forwards a private Unix socket to it, and connects there.
 actor NectoADBClient: NectoADB {
-    private let executable: String
+    let executable: String
     private var serverStarted = false
     /// Whether a serial is on a USB cable or is a real emulator. A serial keeps its
     /// transport while it stays listed.
@@ -34,13 +34,17 @@ actor NectoADBClient: NectoADB {
         self.executable = executable
     }
 
-    /// The adb in the Android SDK, if one is installed. An app started from the Finder
-    /// does not inherit the shell's PATH, so the SDK's usual places are checked instead.
+    /// The adb in the Android SDK, if one is installed. An SDK folder chosen in Settings
+    /// is the only place looked at. Without one, the SDK's usual places are checked: an
+    /// app started from the Finder does not inherit the shell's PATH or its variables.
     static func locate(
+        sdk: String? = nil,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         home: String = userHome
     ) -> String? {
-        let roots = [environment["ANDROID_HOME"], environment["ANDROID_SDK_ROOT"], home + "/Library/Android/sdk"]
+        let chosen = sdk.map { ($0 as NSString).expandingTildeInPath }.flatMap { $0.isEmpty ? nil : $0 }
+        let roots: [String?] = chosen.map { [$0] }
+            ?? [environment["ANDROID_HOME"], environment["ANDROID_SDK_ROOT"], home + "/Library/Android/sdk"]
         return roots.compactMap { $0 }.filter { !$0.isEmpty }
             .map { $0 + "/platform-tools/adb" }
             .first { FileManager.default.isExecutableFile(atPath: $0) }

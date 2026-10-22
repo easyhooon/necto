@@ -57,7 +57,9 @@ public actor NectoConnectionCenter {
 
     private let port: UInt16
     private let probeInterval: Duration
-    private let adb: (any NectoADB)?
+    private var adb: (any NectoADB)?
+    /// The adb file behind ``adb``, so choosing the same SDK again changes nothing.
+    private var adbExecutable: String?
     private var started = false
     private let deviceEvents: @Sendable () -> AsyncThrowingStream<NectoUSBDeviceEvent, any Error>
     private var onEnvelope: (@Sendable (NectoEnvelope, NectoTarget) -> Void)?
@@ -73,25 +75,35 @@ public actor NectoConnectionCenter {
     private var sessionTasks: [ObjectIdentifier: Task<Void, Never>] = [:]
     private var observers: [UUID: AsyncStream<[NectoConnectedApp]>.Continuation] = [:]
 
+    /// [androidSDK] is an SDK folder chosen in Settings; nil or empty finds one itself.
     public init(
         port: UInt16 = NectoTransportDefaults.devicePort,
-        probeInterval: Duration = .seconds(2)
+        probeInterval: Duration = .seconds(2),
+        androidSDK: String? = nil
     ) {
         // Without the Android SDK there is no adb, and Android discovery stays off.
+        let executable = NectoADBClient.locate(sdk: androidSDK)
         self.init(port: port, probeInterval: probeInterval, deviceEvents: NectoUSBHub.deviceEvents,
-                  adb: NectoADBClient.locate().map { NectoADBClient(executable: $0) })
+                  adb: executable.map { NectoADBClient(executable: $0) }, adbExecutable: executable)
+    }
+
+    /// The adb that an SDK folder chosen in Settings, or none, leads to.
+    public static func adbExecutable(androidSDK: String?) -> String? {
+        NectoADBClient.locate(sdk: androidSDK)
     }
 
     init(
         port: UInt16,
         probeInterval: Duration,
         deviceEvents: @escaping @Sendable () -> AsyncThrowingStream<NectoUSBDeviceEvent, any Error>,
-        adb: (any NectoADB)? = nil
+        adb: (any NectoADB)? = nil,
+        adbExecutable: String? = nil
     ) {
         self.port = port
         self.probeInterval = probeInterval
         self.deviceEvents = deviceEvents
         self.adb = adb
+        self.adbExecutable = adbExecutable
     }
 
     public var connectedApps: [NectoConnectedApp] {
@@ -163,6 +175,31 @@ public actor NectoConnectionCenter {
             startProbe(.local(port: candidate))
         }
         if let adb { androidWatcher = Task { await watchAndroid(adb) } }
+    }
+
+    /// Moves Android discovery to the adb in [androidSDK]. Every adb talks to the same
+    /// server on this Mac, so forwards and connections made through the old one stay.
+    public func setAndroidSDK(_ androidSDK: String?) {
+        let executable = NectoADBClient.locate(sdk: androidSDK)
+        guard executable != adbExecutable else { return }
+        let previous = adb
+        adbExecutable = executable
+        adb = executable.map { NectoADBClient(executable: $0) }
+        androidWatcher?.cancel()
+        androidWatcher = nil
+        if adb == nil {
+            // Nothing follows the Android apps any more, so they are let go now rather
+            // than left connected with no one to notice them leave.
+            let forwards = Array(androidForwards.keys)
+            androidForwards.removeAll()
+            for endpoint in forwards { probes.removeValue(forKey: .android(endpoint))?.cancel() }
+            let ids = Set(forwards.map(\.connectionID))
+            removeConnections { ids.contains($0.id) }
+            if let previous, !forwards.isEmpty {
+                Task { for endpoint in forwards { await previous.removeForward(serial: endpoint.serial, socketPath: endpoint.socketPath) } }
+            }
+        }
+        if started, let adb { androidWatcher = Task { await watchAndroid(adb) } }
     }
 
     public func stop() {

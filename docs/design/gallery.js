@@ -440,6 +440,18 @@ const generalPage = () => `
       <input class="necto-field" style="flex:none; width:190px" value="ui-monospace" aria-label="Code font" />
     </div>
 
+    <h3 class="necto-section-title">Android</h3>
+
+    <div class="necto-row">
+      <div class="necto-row-label">Android SDK
+        <p class="necto-row-hint">Found automatically. Choose a folder if adb is elsewhere.</p>
+      </div>
+      <div class="necto-toolbar-group" style="padding: 0">
+        <input class="necto-field" style="flex:none; width:190px" placeholder="Automatic" aria-label="Android SDK" />
+        <button type="button" class="necto-button necto-button-quiet">Choose…</button>
+      </div>
+    </div>
+
     <h3 class="necto-section-title">About</h3>
 
     <div class="necto-row">

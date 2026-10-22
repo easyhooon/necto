@@ -29,6 +29,14 @@
 "A font family or CSS fallback stack." = "글꼴 이름 또는 CSS 대체 글꼴 목록입니다.";
 "Code font" = "코드 글꼴";
 "Used for code, values and plugin data." = "코드, 값, 플러그인 데이터에 사용됩니다.";
+"Android" = "Android";
+"Android SDK" = "Android SDK";
+"Automatic" = "자동";
+"Found automatically. Choose a folder if adb is elsewhere." = "자동으로 찾았습니다. adb가 다른 곳에 있다면 폴더를 지정하세요.";
+"Not found. Choose the SDK folder that holds platform-tools." = "찾지 못했습니다. platform-tools가 들어 있는 SDK 폴더를 지정하세요.";
+"Uses adb from this folder." = "이 폴더의 adb를 사용합니다.";
+"No platform-tools/adb in this folder." = "이 폴더에 platform-tools/adb가 없습니다.";
+"Choose the Android SDK folder." = "Android SDK 폴더를 선택하세요.";
 "About" = "정보";
 "Protocol" = "프로토콜";
 "The wire version this build speaks." = "이 빌드가 사용하는 통신 프로토콜 버전입니다.";

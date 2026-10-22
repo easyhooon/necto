@@ -415,5 +415,28 @@ struct NectoAndroidConnectionTests {
         #expect(NectoADBClient.locate(environment: ["ANDROID_HOME": sdk], home: "/nonexistent") == adb)
         #expect(NectoADBClient.locate(environment: ["ANDROID_SDK_ROOT": sdk], home: "/nonexistent") == adb)
         #expect(NectoADBClient.locate(environment: [:], home: "/nonexistent") == nil)
+        // A folder chosen in Settings is the only place looked at; an empty one is none.
+        #expect(NectoADBClient.locate(sdk: sdk, environment: [:], home: "/nonexistent") == adb)
+        #expect(NectoADBClient.locate(sdk: "/nonexistent", environment: ["ANDROID_HOME": sdk], home: "/nonexistent") == nil)
+        #expect(NectoADBClient.locate(sdk: "", environment: ["ANDROID_HOME": sdk], home: "/nonexistent") == adb)
+    }
+
+    @Test("An SDK folder without adb lets the Android apps go")
+    func losesADB() async throws {
+        let adb = FakeADB()
+        let one = Peer(app: "dev.necto.one")
+        await adb.listen(one, as: name("a"))
+        await adb.set(serials: ["phone"])
+        await adb.set(apps: ["dev.necto.one": name("a")], on: "phone")
+        let center = NectoConnectionCenter(port: try unusedPort(), probeInterval: .milliseconds(30),
+                                           deviceEvents: { AsyncThrowingStream { $0.finish() } },
+                                           adb: adb, adbExecutable: "/fake/platform-tools/adb")
+        await center.start()
+        defer { Task { await center.stop(); await one.stop(); await adb.stop() } }
+
+        try await wait { await center.connectedApps.count == 1 }
+        await center.setAndroidSDK("/nonexistent")
+        #expect(await center.connectedApps.isEmpty)
+        try await wait { await adb.removed.count == 1 }
     }
 }
