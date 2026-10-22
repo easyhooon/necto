@@ -9,8 +9,10 @@ import im.toss.necto.model.NectoHandshakeAck
 import im.toss.necto.model.NectoHandshakeHello
 import im.toss.necto.model.NectoJsonSchema
 import im.toss.necto.model.NectoJsonValue
+import im.toss.necto.model.NectoManifestValidationError
 import im.toss.necto.model.NectoPanelArchive
 import im.toss.necto.model.NectoPluginInvocation
+import im.toss.necto.model.NectoPluginManifest
 import im.toss.necto.model.NectoPluginResult
 import im.toss.necto.model.NectoSemanticVersion
 import im.toss.necto.model.jsonObject
@@ -122,5 +124,24 @@ class ModelTests {
         assertEquals("""{"requestID":"r1","error":{"code":"INVALID_INPUT","message":"bad"},"isFinal":true}""", failure.toJson().toJson())
         assertEquals(failure, NectoPluginResult.fromJson(failure.toJson()))
         assertEquals(1, NectoBridgeCatalog(emptyList()).catalogVersion)
+    }
+
+    /** The same cases as the Mac host's manifest tests, which refuse what they refuse. */
+    @Test
+    fun originsFollowTheMacRules() {
+        fun manifest(origin: String) = NectoPluginManifest(
+            id = "dev.necto.origin", name = "Origin", description = "Origin", version = "1.0.0", author = "Necto",
+            iconSystemName = "network", assets = listOf("index.html"), allowedOrigins = listOf(origin), operations = emptyList(),
+        )
+        for (origin in listOf("self", "https://example.com", "https://example.com:8443/", "https://[::1]:443")) {
+            manifest(origin).validate()
+        }
+        for (origin in listOf(
+            "http://example.com", "https://example.com/path", "https://user@example.com",
+            "https://example.com?query=1", "https://example.com#fragment", "https://*.example.com",
+            "https://example.com:0", "https://example.com:65536", "https://example.com;script-src",
+        )) {
+            assertFailsWith<NectoManifestValidationError>(origin) { manifest(origin).validate() }
+        }
     }
 }

@@ -143,11 +143,16 @@ public data class NectoPluginManifest(
             }
         }
 
+        /** The same rules as the Mac host's, so a manifest it would refuse never ships. */
         private fun isValidOrigin(value: String): Boolean {
             if (value == "self") return true
-            if (!value.startsWith("https://")) return false
-            val host = runCatching { java.net.URI(value).host }.getOrNull()
-            return !host.isNullOrEmpty()
+            val url = runCatching { java.net.URI(value) }.getOrNull() ?: return false
+            val host = url.host
+            return url.scheme == "https" && !host.isNullOrEmpty() &&
+                host.all { it in 'A'..'Z' || it in 'a'..'z' || it in '0'..'9' || it in ".-:[]" } &&
+                url.rawUserInfo == null && url.rawQuery == null && url.rawFragment == null &&
+                (url.rawPath.isNullOrEmpty() || url.rawPath == "/") &&
+                (url.port == -1 || url.port in 1..65535)
         }
     }
 }
