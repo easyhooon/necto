@@ -74,12 +74,37 @@ actor NectoADBClient: NectoADB {
         return result
     }
 
+    /// Asks running third-party apps only. The package list and the process list each
+    /// throw on failure, so a device that cannot answer is never read as one without apps.
     func endpoints(serial: String) async throws -> [String: String] {
-        let output = try await adb(["-s", serial, "shell", Self.endpointScript], timeoutMilliseconds: 10_000)
-        // The shell exits with its last command's status, so only the marker shows that
-        // the scan ran to its end. Without it the answer is incomplete, not empty.
-        guard output.hasSuffix(Self.scanDone + "\n") else { throw POSIXError(.EIO) }
-        return Self.endpoints(output)
+        let packages = Self.packages(try await adb(["-s", serial, "shell", "pm", "list", "packages", "-3"]))
+        let running = Self.processes(try await adb(["-s", serial, "shell", "ps", "-A", "-o", "NAME="]))
+        let executable = executable
+        // One run-as per app, side by side: a phone runs a few dozen apps, and asked one
+        // after another they take most of a probe interval.
+        let files = await withTaskGroup(of: (String, String?).self) { group in
+            for package in packages.intersection(running) {
+                group.addTask {
+                    // run-as fails for an app that is not debuggable or has no file: that
+                    // app is skipped, not the scan.
+                    let output = try? await NectoProcessRunner.run(
+                        executable, arguments: Self.server + ["-s", serial, "shell", "run-as", package, "cat", "no_backup/necto-endpoint"],
+                        environment: Self.environment, timeoutMilliseconds: 5_000, maximumOutputBytes: 4_096
+                    )
+                    return (package, output?.exitCode == 0 ? output.map { String(decoding: $0.stdout, as: UTF8.self) } : nil)
+                }
+            }
+            return await group.reduce(into: [(String, String?)]()) { $0.append($1) }
+        }
+        var result: [String: String] = [:]
+        var unanswered = false
+        for (package, contents) in files {
+            guard let contents else { unanswered = true; continue }
+            if let name = Self.endpointName(contents) { result[package] = name }
+        }
+        // A device that left also fails every run-as, so it must still answer.
+        if unanswered { _ = try await adb(["-s", serial, "get-state"]) }
+        return result
     }
 
     func forward(serial: String, socketPath: String, name: String) async throws {
@@ -133,17 +158,6 @@ actor NectoADBClient: NectoADB {
         return environment
     }
 
-    /// Asks running third-party apps only, in one shell, so a scan stays under a second.
-    /// A file is printed only when it holds exactly one name: an app writes its own, and
-    /// a second line could name another app.
-    static let endpointScript = #"k=" $(pm list packages -3 | cut -d: -f2 | tr '\n' ' ') "; "#
-        + #"for p in $(ps -A -o NAME= | cut -d: -f1 | sort -u); do case "$k" in *" $p "*) "#
-        + #"e=$(run-as "$p" cat no_backup/necto-endpoint 2>/dev/null) || continue; h=${e#necto.}; "#
-        + #"[ "$e" = "necto.$h" ] && [ ${#h} -eq 64 ] && [ -z "$(printf %s "$h" | tr -d 0-9a-f)" ] && echo "$p $e";; "#
-        + #"esac; done; echo "# + scanDone
-
-    static let scanDone = "necto-scan-done"
-
     static func authorizedSerials(_ output: String) -> [String] {
         output.split(separator: "\n").dropFirst().compactMap { line in
             let fields = line.split(whereSeparator: \.isWhitespace)
@@ -160,20 +174,28 @@ actor NectoADBClient: NectoADB {
         }
     }
 
-    /// Lines of `<package> <name>`. Both come from the device, so both are checked, and
-    /// a package listed twice is dropped: one of the two lines was not its own.
-    static func endpoints(_ output: String) -> [String: String] {
-        var result: [String: String] = [:]
-        var repeated: Set<String> = []
-        // Only "\n" ends a line: the script prints nothing else, and a "\r" left inside a
-        // field must fail the checks below rather than start a line of its own.
-        for line in output.split(separator: "\n", omittingEmptySubsequences: true) {
-            let fields = line.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
-            guard fields.count == 2, isPackageName(fields[0]), isEndpointName(fields[1]) else { continue }
-            if result.updateValue(fields[1], forKey: fields[0]) != nil { repeated.insert(fields[0]) }
-        }
-        for package in repeated { result.removeValue(forKey: package) }
-        return result
+    /// Lines of `package:<name>` from `pm list packages`.
+    static func packages(_ output: String) -> Set<String> {
+        Set(output.split(separator: "\n").compactMap { line in
+            guard line.hasPrefix("package:") else { return nil }
+            let name = String(line.dropFirst("package:".count)).trimmingCharacters(in: .whitespaces)
+            return isPackageName(name) ? name : nil
+        })
+    }
+
+    /// Process names from `ps`, with a `:service` suffix dropped to leave the package.
+    static func processes(_ output: String) -> Set<String> {
+        Set(output.split(separator: "\n").compactMap { line in
+            let name = String(line.split(separator: ":", maxSplits: 1).first ?? "").trimmingCharacters(in: .whitespaces)
+            return isPackageName(name) ? name : nil
+        })
+    }
+
+    /// The name an app wrote into its endpoint file: one line and nothing else. A second
+    /// line or a stray "\r" fails the check rather than being read past.
+    static func endpointName(_ contents: String) -> String? {
+        let name = contents.hasSuffix("\n") ? String(contents.dropLast()) : contents
+        return isEndpointName(name) ? name : nil
     }
 
     static func isPackageName(_ value: String) -> Bool {

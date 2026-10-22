@@ -343,18 +343,37 @@ struct NectoAndroidConnectionTests {
         await #expect(throws: POSIXError.self) { _ = try await failing.endpoints(serial: "phone") }
 
         let good = name("a").replacingOccurrences(of: "a", with: "0")
-        let (cut, second) = try fakeADB("""
-            case "$*" in *shell*) echo "dev.necto.one \(good)";; esac
-            """)
+        // Each step answers alone: the packages, the processes, then each app's file.
+        func device(pm: String = "echo package:dev.necto.one; echo package:dev.necto.two",
+                    ps: String = "echo dev.necto.one; echo dev.necto.two:remote; echo system_server",
+                    state: String = "echo device") -> String {
+            """
+            case "$*" in
+            *" pm list packages -3") \(pm);;
+            *" ps -A -o NAME=") \(ps);;
+            *" run-as dev.necto.one "*) echo \(good);;
+            *" run-as "*) exit 1;;
+            *" get-state") \(state);;
+            *) exit 9;;
+            esac
+            """
+        }
+        let (whole, second) = try fakeADB(device())
         defer { try? FileManager.default.removeItem(atPath: second) }
-        // A scan that stopped before its marker is incomplete, not a device without apps.
-        await #expect(throws: POSIXError.self) { _ = try await cut.endpoints(serial: "phone") }
-
-        let (whole, third) = try fakeADB("""
-            case "$*" in *shell*) echo "dev.necto.one \(good)"; echo \(NectoADBClient.scanDone);; esac
-            """)
-        defer { try? FileManager.default.removeItem(atPath: third) }
+        // An app run-as cannot read is skipped, not the device.
         #expect(try await whole.endpoints(serial: "phone") == ["dev.necto.one": good])
+
+        let (noPackages, third) = try fakeADB(device(pm: "exit 1"))
+        defer { try? FileManager.default.removeItem(atPath: third) }
+        await #expect(throws: POSIXError.self) { _ = try await noPackages.endpoints(serial: "phone") }
+        let (noProcesses, fifth) = try fakeADB(device(ps: "exit 1"))
+        defer { try? FileManager.default.removeItem(atPath: fifth) }
+        await #expect(throws: POSIXError.self) { _ = try await noProcesses.endpoints(serial: "phone") }
+
+        // run-as failing for every app is what a device that left looks like too.
+        let (gone, fourth) = try fakeADB(device(state: "exit 1"))
+        defer { try? FileManager.default.removeItem(atPath: fourth) }
+        await #expect(throws: POSIXError.self) { _ = try await gone.endpoints(serial: "phone") }
     }
 
     @Test("adb output is read strictly: only authorized devices and well-formed names")
@@ -367,17 +386,14 @@ struct NectoAndroidConnectionTests {
 
             """) == ["R3CY70P3F4H"])
         let good = name("a").replacingOccurrences(of: "a", with: "0")
-        #expect(NectoADBClient.endpoints("""
-            dev.necto.one \(good)
-            dev.necto.two necto.short
-            bad;name \(good)
-            dev.necto.three \(good) extra
-            """) == ["dev.necto.one": good])
-        // An app writing a second line into its own file cannot file a name under
-        // another package, whichever line ending it uses.
-        #expect(NectoADBClient.endpoints("dev.evil.app \(good)\ndev.victim.app \(good)\ndev.evil.app \(good)\n")
-            == ["dev.victim.app": good])
-        #expect(NectoADBClient.endpoints("dev.evil.app \(good)\rdev.victim.app \(good)\n").isEmpty)
+        #expect(NectoADBClient.packages("package:dev.necto.one\npackage:bad;name\nother\n") == ["dev.necto.one"])
+        #expect(NectoADBClient.processes("dev.necto.one\ndev.necto.two:remote\n/system/bin/init\nbad name\n")
+            == ["dev.necto.one", "dev.necto.two"])
+        #expect(NectoADBClient.endpointName(good + "\n") == good)
+        // An app's own file holds one name: a second line or a "\r" refuses it whole.
+        #expect(NectoADBClient.endpointName(good + "\n" + good + "\n") == nil)
+        #expect(NectoADBClient.endpointName(good + "\r\n") == nil)
+        #expect(NectoADBClient.endpointName("necto.short\n") == nil)
         #expect(!NectoADBClient.isEndpointName(good + "\n"))
         #expect(!NectoADBClient.isPackageName("a.b\n"))
         #expect(!NectoADBClient.isPackageName("a.b; rm -rf /"))
