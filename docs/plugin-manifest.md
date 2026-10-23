@@ -46,7 +46,7 @@ syntax and nothing falls back.
 | `authorUrl` | — | string | Author link |
 | `icon` | ✅ | object | `{ "systemName": "network" }`, an SF Symbols name |
 | `assets` | ✅ | string[] | Files and directories to package |
-| `allowedOrigins` | ✅ | string[] | Origin declarations: `self` or `https://…`. Currently only the value format is validated |
+| `allowedOrigins` | ✅ | string[] | Origin declarations: `self` or an exact `https://…` origin. Currently only the value format is validated |
 | `operations` | ✅ | object[] | Operations the plugin may call; empty for a pure web tool |
 
 `allowedOrigins` is not a network allowlist. Independently of that declaration,
@@ -382,4 +382,6 @@ the bridges it needs to work.
 unnecessary. Whether a connected app is required is derived from the bindings.
 
 **Declarations are not enforcement.** `allowedOrigins` is required, but the current
-implementation only validates its format. Do not use it as a network security boundary.
+implementation only validates its format: `self` or an exact HTTPS origin with an
+optional port. Credentials, paths other than `/`, queries, fragments and wildcards
+are refused. Do not use it as a network security boundary.

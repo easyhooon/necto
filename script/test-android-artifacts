@@ -1,0 +1,44 @@
+#!/usr/bin/env python3
+"""Verify what the Android build ships: the SDK asks for no permissions, carries
+no panels of its own, and the sample is debuggable in debug builds only."""
+import argparse
+import json
+import os
+from pathlib import Path
+import subprocess
+import zipfile
+
+root = Path(__file__).resolve().parent.parent
+android = root / "SDK/Android"
+sdk = Path(os.environ.get("ANDROID_HOME", Path.home() / "Library/Android/sdk"))
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--aapt", default=str(sdk / "build-tools/35.0.0/aapt"))
+args = parser.parse_args()
+results = {}
+
+# The SDK must not change what the app asks the user for.
+aar = android / "necto-android/build/outputs/aar/necto-android-release.aar"
+with zipfile.ZipFile(aar) as archive:
+    assert "classes.jar" in archive.namelist()
+    manifest = archive.read("AndroidManifest.xml").decode()
+    assert "uses-permission" not in manifest, "necto-android declares a permission"
+results["nectoAndroidAAR"] = dict(bytes=aar.stat().st_size, permissions=0)
+
+# The SDK is a bridge: panels ride with the plugins that bring them, never in the core.
+jar = next((android / "necto-core/build/libs").glob("necto-core-*[0-9].jar"))
+with zipfile.ZipFile(jar) as archive:
+    carried = [name for name in archive.namelist() if name.startswith("necto/panels/")]
+    assert not carried, f"necto-core carries panels: {carried[:3]}"
+
+# Necto starts in debuggable builds only, so a release must not be debuggable.
+for variant, suffix in (("debug", ""), ("release", "-unsigned")):
+    apk = android / f"sample/build/outputs/apk/{variant}/sample-{variant}{suffix}.apk"
+    badging = subprocess.check_output([args.aapt, "dump", "badging", str(apk)], text=True)
+    debuggable = "application-debuggable" in badging.splitlines()
+    assert debuggable == (variant == "debug"), f"Unexpected debuggable flag in {variant}"
+    results[variant] = dict(debuggable=debuggable)
+
+output = root / "Build/Android/artifact-results.json"
+output.parent.mkdir(parents=True, exist_ok=True)
+output.write_text(json.dumps(results, indent=2))
+print("PASS: no SDK permissions, no panels in the core, debuggable in debug only")

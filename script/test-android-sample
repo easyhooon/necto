@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+"""Drive the Android sample that script/android-sample runs through necto-cli: the
+target appears, the panel the app carries answers, a stream can be cancelled and
+resubscribed, and the target leaves and returns with the app."""
+import json
+import os
+from pathlib import Path
+import subprocess
+import time
+
+root = Path(__file__).resolve().parent.parent
+out = root / "Build/Android"
+run = json.loads((out / "current-run.json").read_text())
+app = "im.toss.necto.sample"
+assert run["applicationID"] == app
+env = dict(os.environ, CFFIXED_USER_HOME=run["home"])
+target = ["--device", "android:" + run["serial"], "--app", app]
+results = {}
+
+
+def cli(args, scoped=True, check=True, timeout=20):
+    command = [run["cli"], *args, *(target if scoped else [])]
+    result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=timeout)
+    if check and result.returncode:
+        raise AssertionError(result.stderr)
+    return result
+
+
+def adb(*args):
+    return subprocess.run([run["adb"], "-s", run["serial"], *args],
+                          capture_output=True, text=True, check=True, timeout=30).stdout
+
+
+def wait_for(predicate, description, timeout=20):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return
+        time.sleep(0.2)
+    raise AssertionError("Timed out: " + description)
+
+
+def connected():
+    devices = json.loads(cli(["device", "list", "--json"], scoped=False).stdout)["devices"]
+    return any(device["id"] == "android:" + run["serial"] and
+               any(entry["bundleID"] == app for entry in device["apps"])
+               for device in devices)
+
+
+def available(plugin, operation):
+    response = cli(["plugin", "help", plugin, operation, "--json"], check=False)
+    return response.returncode == 0 and json.loads(response.stdout).get("operation", {}).get("available") is True
+
+
+def send(plugin, operation, payload=None):
+    args = ["plugin", "send", plugin, operation]
+    if payload is not None:
+        args += ["--input", json.dumps(payload)]
+    return json.loads(cli(args).stdout)
+
+
+def stream(count):
+    result = cli(["plugin", "subscribe", "plugin-sample", "host.ticks",
+                  "--input", json.dumps({"intervalMs": 200}), "--limit", str(count)], timeout=15)
+    values = [json.loads(line) for line in result.stdout.splitlines()]
+    assert len(values) == count and all(isinstance(value, dict) for value in values)
+    return values
+
+
+wait_for(connected, "Android target")
+wait_for(lambda: available("plugin-sample", "host.info"), "carried sample panel and contracts")
+results["target"] = json.loads(cli(["device", "list", "--json"], scoped=False).stdout)
+results["info"] = send("plugin-sample", "host.info")
+assert results["info"]["nectoVersion"]
+
+invalid = cli(["plugin", "send", "plugin-sample", "host.info", "--input", '{"unexpected":1}'], check=False)
+assert invalid.returncode != 0 and "INVALID_INPUT" in invalid.stderr
+results["invalidInput"] = invalid.stderr.strip()
+
+results["stream"] = stream(2)
+results["resubscribeAfterCancel"] = stream(2)
+
+adb("shell", "am", "force-stop", app)
+try:
+    wait_for(lambda: not connected(), "target removal")
+    results["disconnect"] = True
+finally:
+    adb("shell", "am", "start", "-W", "-n", app + "/.MainActivity")
+
+wait_for(connected, "reconnection")
+wait_for(lambda: available("plugin-sample", "host.info"), "panel after reconnection")
+results["reconnectInfo"] = send("plugin-sample", "host.info")
+results["hostPID"] = run["pid"]
+os.kill(run["pid"], 0)
+(out / "e2e-results.json").write_text(json.dumps(results, indent=2, ensure_ascii=False))
+print("PASS: target, carried panel, invalid input, stream and resubscribe, disconnect, reconnect")
+print(out / "e2e-results.json")
