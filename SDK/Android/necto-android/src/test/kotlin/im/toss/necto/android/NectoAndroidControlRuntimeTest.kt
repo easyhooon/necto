@@ -128,6 +128,28 @@ class NectoAndroidControlRuntimeTest {
         assertFalse(longPressed)
     }
 
+    /** A swipe cancelled mid-drag must release the touch instead of leaving it down. */
+    @Test
+    fun aCancelledSwipeReleasesTheTouch() = runTest {
+        val actions = mutableListOf<Int>()
+        val area = View(start()).apply {
+            setOnTouchListener { _, event -> actions += event.actionMasked; true }
+        }
+        show(area)
+        val screen = runtime.snapshot().first { it.role == "screen" }
+
+        val swipe = launch {
+            runtime.perform("swipe", jsonObject("targetID" to jsonOf(screen.id), "direction" to jsonOf("up")))
+        }
+        runCurrent()
+        assertEquals(listOf(MotionEvent.ACTION_DOWN), actions)
+        swipe.cancel()
+        runCurrent()
+        idle()
+
+        assertEquals(listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_CANCEL), actions)
+    }
+
     // MARK: Compose
 
     @Test
