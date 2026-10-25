@@ -126,9 +126,10 @@ One session is served at a time.
   - It overrides only the Control and Preferences manifests, which describe Android
     behaviour. They live in `necto-core/src/main/panel-manifests`, and the build fails
     when their contracts drift from the iOS ones.
-- **Files writes** are bounded by the 64 KiB inbound frame, the limit `android-poc`
-  set. A larger `files.write` closes the session, the request fails with
-  `PROVIDER_FAILED`, and Necto reconnects within a second.
+- **Requests from Necto** are bounded by the 64 KiB inbound frame, which reaches
+  `files.write` and `preferences.set` with a large string. A larger request closes
+  the session, the request fails with `PROVIDER_FAILED`, and Necto reconnects within a
+  second.
 
 ## Sample app
 
