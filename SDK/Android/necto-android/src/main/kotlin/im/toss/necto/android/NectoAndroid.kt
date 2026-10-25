@@ -43,13 +43,13 @@ public object NectoAndroid {
     public val currentActivity: Activity? get() = resumed?.get()
 
     /**
-     * Starts Necto with [plugins], which default to every plugin Necto ships for Android.
+     * Starts Necto with [plugins], or with every plugin Necto ships for Android when null.
      * Safe to call more than once; plugins already registered are skipped. In a build
      * that is not debuggable it only logs a warning.
      */
     public fun start(
         context: Context,
-        plugins: List<NectoPlugin> = NectoAndroidPlugins.defaults(context),
+        plugins: List<NectoPlugin>? = null,
     ) {
         val application = context.applicationContext as Application
         if (application.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE == 0) {
@@ -58,7 +58,8 @@ public object NectoAndroid {
         }
         track(application)
         NectoSDK.identity = NectoAndroidAppIdentity(application)
-        plugins.forEach { plugin ->
+        // Built only here, so a build that is not debuggable never creates them.
+        (plugins ?: NectoAndroidPlugins.defaults(context)).forEach { plugin ->
             if (NectoSDK.plugins.none { it.id == plugin.id }) NectoSDK.register(plugin)
         }
         NectoSDK.start { NectoAndroidListener(application) }
