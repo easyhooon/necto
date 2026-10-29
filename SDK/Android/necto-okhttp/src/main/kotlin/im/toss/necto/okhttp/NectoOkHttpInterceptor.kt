@@ -52,11 +52,16 @@ public class OkHttpNetworkPlugin(public val network: NectoNetworkPlugin = NectoN
 /**
  * Captures OkHttp traffic and reports it to whatever takes reports.
  *
- * It only observes: the request goes through unchanged and the response body reaches
+ * It only observes: the request's bytes go through unchanged and the response body reaches
  * the app as it arrives. Bytes are copied while the app reads them, up to
  * [NectoNetworkRecord.Body.CAPTURE_LIMIT], and the record completes when the app reaches
  * the end of the body or closes it, so streams such as server-sent events are never held
  * back. A body the app never reads or closes leaves its record pending.
+ *
+ * The request body is wrapped so its bytes are copied as OkHttp sends them. An
+ * interceptor added after this one sees that wrapper rather than the app's
+ * `FormBody` or `MultipartBody`, so add this one after any interceptor that inspects
+ * body types. One that compresses the body before this one is captured compressed.
  */
 public class NectoOkHttpInterceptor(private val reporter: NectoNetworkReporting) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
@@ -159,7 +164,8 @@ private class CapturingRequestBody(private val delegate: RequestBody) : RequestB
             }
         }.buffer()
         delegate.writeTo(tee)
-        tee.emit()
+        // A body that closes its sink, as a gzip wrapper does, has already pushed it all through.
+        if (tee.isOpen) tee.emit()
     }
 
     fun captured(): NectoNetworkRecord.Body? {

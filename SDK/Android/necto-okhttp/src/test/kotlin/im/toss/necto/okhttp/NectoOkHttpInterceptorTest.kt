@@ -7,11 +7,13 @@ import im.toss.necto.plugins.NectoNetworkReporting
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.SocketPolicy
+import okio.BufferedSink
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -134,6 +136,23 @@ class NectoOkHttpInterceptorTest {
         assertEquals(NectoNetworkRecord.State.COMPLETED, completed.state)
         assertEquals("sent", completed.requestBody?.text)
         assertEquals("sent", server.takeRequest().body.readUtf8())
+    }
+
+    /** A body that closes the sink it writes to, as a gzip wrapper does, still goes out. */
+    @Test
+    fun aBodyThatClosesItsSinkIsSentAndCaptured() {
+        server.enqueue(MockResponse())
+        val closing = object : RequestBody() {
+            override fun contentType() = "text/plain".toMediaType()
+            override fun writeTo(sink: BufferedSink) {
+                sink.use { it.writeUtf8("closed") }
+            }
+        }
+
+        client.newCall(Request.Builder().url(server.url("/closing")).post(closing).build()).execute().close()
+
+        assertEquals("closed", records.last().requestBody?.text)
+        assertEquals("closed", server.takeRequest().body.readUtf8())
     }
 
     @Test
