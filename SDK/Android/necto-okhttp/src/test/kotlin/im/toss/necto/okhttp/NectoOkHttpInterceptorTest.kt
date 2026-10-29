@@ -7,10 +7,12 @@ import im.toss.necto.plugins.NectoNetworkReporting
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.SocketPolicy
+import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlin.test.AfterTest
@@ -112,6 +114,26 @@ class NectoOkHttpInterceptorTest {
         val completed = records.last()
         assertEquals(NectoNetworkRecord.State.COMPLETED, completed.state)
         assertTrue(completed.responseBody!!.text!!.startsWith("data: first"))
+    }
+
+    /** The record holds what was sent, even when the file is gone before the response. */
+    @Test
+    fun anUploadedFileIsCapturedAsItIsSent() {
+        server.enqueue(MockResponse())
+        val file = File.createTempFile("necto-upload", ".txt").apply { writeText("sent") }
+        val deleting = client.newBuilder().addNetworkInterceptor { chain ->
+            chain.proceed(chain.request()).also { file.delete() }
+        }.build()
+        val request = Request.Builder().url(server.url("/upload"))
+            .post(file.asRequestBody("text/plain".toMediaType()))
+            .build()
+
+        deleting.newCall(request).execute().close()
+
+        val completed = records.last()
+        assertEquals(NectoNetworkRecord.State.COMPLETED, completed.state)
+        assertEquals("sent", completed.requestBody?.text)
+        assertEquals("sent", server.takeRequest().body.readUtf8())
     }
 
     @Test

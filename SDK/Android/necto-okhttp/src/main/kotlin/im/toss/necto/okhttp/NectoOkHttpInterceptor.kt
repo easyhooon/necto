@@ -10,15 +10,16 @@ import im.toss.necto.sdk.NectoPluginPanel
 import im.toss.necto.sdk.NectoRegistrar
 import okhttp3.Headers
 import okhttp3.Interceptor
-import okhttp3.Request
+import okhttp3.MediaType
+import okhttp3.RequestBody
 import okhttp3.Response
 import okhttp3.ResponseBody
 import okhttp3.ResponseBody.Companion.asResponseBody
 import okio.Buffer
+import okio.BufferedSink
+import okio.ForwardingSink
 import okio.ForwardingSource
-import okio.Sink
 import okio.Source
-import okio.Timeout
 import okio.buffer
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -59,7 +60,12 @@ public class OkHttpNetworkPlugin(public val network: NectoNetworkPlugin = NectoN
  */
 public class NectoOkHttpInterceptor(private val reporter: NectoNetworkReporting) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
-        val request = chain.request()
+        val original = chain.request()
+        // The upload is copied as OkHttp sends it, so the record holds what went out. Reading
+        // the body again later could see a file that has changed, or one that is gone.
+        // Duplex bodies keep writing after the response, so they are not captured.
+        val upload = original.body?.takeUnless { it.isDuplex() }?.let(::CapturingRequestBody)
+        val request = if (upload == null) original else original.newBuilder().method(original.method, upload).build()
         val id = UUID.randomUUID().toString().uppercase()
         val startedAt = System.currentTimeMillis()
         val startedNanos = System.nanoTime()
@@ -83,7 +89,7 @@ public class NectoOkHttpInterceptor(private val reporter: NectoNetworkReporting)
             responseHeaders = response?.let { headers(it.headers) }.orEmpty(),
             // A pending record carries no body yet: sending it twice would double the
             // traffic for large uploads.
-            requestBody = if (state == NectoNetworkRecord.State.PENDING) null else requestBody(request),
+            requestBody = if (state == NectoNetworkRecord.State.PENDING) null else upload?.captured(),
             responseBody = responseBody,
         )
 
@@ -126,18 +132,41 @@ public class NectoOkHttpInterceptor(private val reporter: NectoNetworkReporting)
 
     private fun headers(headers: Headers): Map<String, String> =
         headers.names().associateWith { name -> headers.values(name).joinToString(", ") }
+}
 
-    private fun requestBody(request: Request): NectoNetworkRecord.Body? {
-        val body = request.body ?: return null
-        // Duplex and one-shot bodies can only be written once, and that write is the app's.
-        if (body.isDuplex() || body.isOneShot()) return null
-        // Keeps the first bytes and only counts the rest, so a large upload is never
-        // held in memory whole.
-        val sink = CappedSink(NectoNetworkRecord.Body.CAPTURE_LIMIT.toLong())
-        sink.buffer().use { body.writeTo(it) }
-        val bytes = sink.kept.readByteArray()
+/**
+ * Passes a request body through unchanged and copies the bytes OkHttp writes, up to the
+ * capture limit. Only the first bytes are kept and the rest counted, so a large upload
+ * is never held in memory whole.
+ */
+private class CapturingRequestBody(private val delegate: RequestBody) : RequestBody() {
+    @Volatile
+    private var copy: CappedSink? = null
+
+    override fun contentType(): MediaType? = delegate.contentType()
+    override fun contentLength(): Long = delegate.contentLength()
+    override fun isOneShot(): Boolean = delegate.isOneShot()
+    override fun isDuplex(): Boolean = delegate.isDuplex()
+
+    override fun writeTo(sink: BufferedSink) {
+        // A retry or redirect writes the body again; the last write is what was sent.
+        val capture = CappedSink(NectoNetworkRecord.Body.CAPTURE_LIMIT.toLong())
+        copy = capture
+        val tee = object : ForwardingSink(sink) {
+            override fun write(source: Buffer, byteCount: Long) {
+                capture.copyFrom(source, byteCount)
+                super.write(source, byteCount)
+            }
+        }.buffer()
+        delegate.writeTo(tee)
+        tee.emit()
+    }
+
+    fun captured(): NectoNetworkRecord.Body? {
+        val copy = copy ?: return null
+        val bytes = copy.kept.snapshot().toByteArray()
         if (bytes.isEmpty()) return null
-        return NectoNetworkRecord.Body.of(bytes, body.contentType()?.toString(), byteCount = sink.count)
+        return NectoNetworkRecord.Body.of(bytes, contentType()?.toString(), byteCount = copy.count)
     }
 }
 
@@ -211,19 +240,15 @@ private class CapturingSource(
     }
 }
 
-private class CappedSink(private val limit: Long) : Sink {
+private class CappedSink(private val limit: Long) {
     val kept = Buffer()
     var count = 0L
         private set
 
-    override fun write(source: Buffer, byteCount: Long) {
+    /** Copies from [source] without consuming it. */
+    fun copyFrom(source: Buffer, byteCount: Long) {
         val keep = minOf(byteCount, limit - kept.size)
-        if (keep > 0) kept.write(source, keep)
-        source.skip(byteCount - maxOf(keep, 0))
+        if (keep > 0) source.copyTo(kept, 0, keep)
         count += byteCount
     }
-
-    override fun flush() = Unit
-    override fun timeout(): Timeout = Timeout.NONE
-    override fun close() = Unit
 }
