@@ -6,12 +6,14 @@ import android.view.View
 import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsConfiguration
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.AnnotatedString
 import im.toss.necto.plugins.NectoAccessibilityItem
+import im.toss.necto.plugins.NectoPoint
 import im.toss.necto.plugins.NectoRect
 
 /**
@@ -46,6 +48,40 @@ internal object NectoComposeSemantics {
         .map { NectoAccessibilityItem(it.role, it.label, it.identifier, it.value, it.isSecure) }
 
     fun find(host: View, id: Int): Node? = walk(host).firstOrNull { it.id == id }
+
+    /**
+     * Whether a touch at [point], in window pixels, reaches the element [id] or one inside
+     * it: the last element drawn there that takes touches must be that one. An element
+     * that takes touches without semantics, such as a bare `pointerInput`, is not seen,
+     * and drawing order is the tree's, so a `zIndex` is not either.
+     */
+    fun isHit(host: View, id: Int, point: NectoPoint): Boolean {
+        val root = root(host) ?: return false
+        var top: SemanticsNode? = null
+        fun visit(node: SemanticsNode) {
+            val config = node.config
+            if (config.contains(SemanticsProperties.InvisibleToUser)) return
+            val bounds = node.boundsInWindow
+            if (takesTouches(config) && point.x >= bounds.left && point.x < bounds.right &&
+                point.y >= bounds.top && point.y < bounds.bottom
+            ) {
+                top = node
+            }
+            if (!config.contains(SemanticsProperties.Password)) node.children.forEach(::visit)
+        }
+        visit(root)
+        var node = top
+        while (node != null) {
+            if (node.id == id) return true
+            node = node.parent
+        }
+        return false
+    }
+
+    /** Disabled or not, an element with these consumes the touch. */
+    private fun takesTouches(config: SemanticsConfiguration): Boolean =
+        config.contains(SemanticsActions.OnClick) || config.contains(SemanticsActions.OnLongClick) ||
+            config.contains(SemanticsActions.ScrollBy) || config.contains(SemanticsActions.SetText)
 
     /**
      * Sets a text field's text through its SetText semantics action, which goes through

@@ -14,8 +14,11 @@ import android.widget.LinearLayout
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.BasicText
@@ -25,6 +28,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.testTag
@@ -32,6 +36,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.password
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import im.toss.necto.model.NectoBridgeError
+import im.toss.necto.model.NectoBridgeErrorCode
 import im.toss.necto.model.NectoJsonValue
 import im.toss.necto.model.jsonObject
 import im.toss.necto.model.jsonOf
@@ -56,6 +62,7 @@ import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
+import org.robolectric.android.controller.ActivityController
 import org.robolectric.annotation.Config
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -63,6 +70,7 @@ import org.robolectric.annotation.Config
 @Config(sdk = [34], qualifiers = "w360dp-h640dp")
 class NectoAndroidControlRuntimeTest {
     private var activity: Activity? = null
+    private var controller: ActivityController<ComponentActivity>? = null
     private val runtime = NectoAndroidControlRuntime { activity }
 
     @Before
@@ -255,10 +263,61 @@ class NectoAndroidControlRuntimeTest {
         assertTrue(runtime.snapshot().none { it.identifier == "increment" })
     }
 
+    /** Inside one Compose host, a touch is refused where another element covers the target. */
+    @Test
+    fun composeElementsCoveredInsideTheirHostAreNotTouched() = runTest {
+        var count by mutableIntStateOf(0)
+        start().compose {
+            Box(Modifier.fillMaxWidth().height(100.dp)) {
+                Box(Modifier.fillMaxSize().testTag("wide").clickable { count++ })
+                Box(Modifier.fillMaxHeight().fillMaxWidth(0.3f).align(Alignment.CenterEnd).testTag("edge").clickable {})
+                Box(Modifier.fillMaxSize().testTag("hidden").clickable {})
+            }
+        }
+        val targets = runtime.snapshot()
+        assertTrue(targets.none { it.identifier == "wide" })
+        assertTrue(targets.none { it.identifier == "edge" })
+        assertNotNull(targets.singleOrNull { it.identifier == "hidden" })
+    }
+
+    @Test
+    fun composeTouchesLandOnlyWhereTheTargetIsOnTop() = runTest {
+        var count by mutableIntStateOf(0)
+        start().compose {
+            Box(Modifier.fillMaxWidth().height(100.dp)) {
+                Box(Modifier.fillMaxSize().testTag("wide").clickable { count++ })
+                Box(Modifier.fillMaxHeight().fillMaxWidth(0.3f).align(Alignment.CenterEnd).testTag("edge").clickable {})
+            }
+        }
+        val wide = runtime.snapshot().single { it.identifier == "wide" }
+
+        assertUnavailable { runtime.perform("tap", jsonObject("targetID" to jsonOf(wide.id), "position" to jsonObject("x" to jsonOf(0.9), "y" to jsonOf(0.5)))) }
+        assertEquals(0, count)
+
+        perform("tap", wide, "position" to jsonObject("x" to jsonOf(0.1), "y" to jsonOf(0.5)))
+        assertEquals(1, count)
+    }
+
+    /** While a dialog or another window holds input focus, the activity behind it is not acted on. */
+    @Test
+    fun nothingIsActedOnWhileAnotherWindowHasFocus() = runTest {
+        var taps = 0
+        show(Button(start()).apply { text = "Save"; setOnClickListener { taps++ } })
+        val save = runtime.snapshot().single { it.label == "Save" }
+
+        controller!!.windowFocusChanged(false)
+        idle()
+
+        assertUnavailable { runtime.perform("tap", jsonObject("targetID" to jsonOf(save.id))) }
+        assertTrue(runtime.snapshot().isEmpty())
+        assertEquals(0, taps)
+    }
+
     // MARK: Helpers
 
     private fun start(): ComponentActivity =
-        Robolectric.buildActivity(ComponentActivity::class.java).setup().get().also { activity = it }
+        Robolectric.buildActivity(ComponentActivity::class.java).setup().windowFocusChanged(true)
+            .also { controller = it }.get().also { activity = it }
 
     private fun ComponentActivity.compose(content: @androidx.compose.runtime.Composable () -> Unit) {
         setContent { Column(Modifier.fillMaxSize()) { content() } }
@@ -279,6 +338,17 @@ class NectoAndroidControlRuntimeTest {
         idle()
         assertNotNull(result["dispatched"])
         return result
+    }
+
+    /** Suspends rather than blocks: an action that wrongly goes ahead fails here instead of hanging. */
+    private suspend fun assertUnavailable(block: suspend () -> Unit) {
+        val error = try {
+            block()
+            null
+        } catch (error: NectoBridgeError) {
+            error
+        }
+        assertEquals(NectoBridgeErrorCode.OPERATION_UNAVAILABLE, error?.code)
     }
 
     private suspend fun labels(): List<String> = runtime.readAccessibility().mapNotNull { it.label }

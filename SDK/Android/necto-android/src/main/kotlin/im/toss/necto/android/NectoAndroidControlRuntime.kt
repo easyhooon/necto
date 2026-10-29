@@ -115,7 +115,8 @@ internal class NectoAndroidControlRuntime(private val activity: () -> Activity?)
         val ids = composeIdentities.getOrPut(host) { HashMap() }
         return NectoComposeSemantics.targets(host).mapNotNull { node ->
             val frame = node.frame.intersection(hostFrame) ?: return@mapNotNull null
-            if (!isHit(root, host, NectoPoint(frame.midX, frame.midY))) return@mapNotNull null
+            val center = NectoPoint(frame.midX, frame.midY)
+            if (!isHit(root, host, center) || !NectoComposeSemantics.isHit(host, node.id, center)) return@mapNotNull null
             val id = ids.getOrPut(node.id) { UUID.randomUUID().toString().uppercase() }
             targets[id] = Target(WeakReference(host), frame, node.label, node.actions, node.id)
             NectoControlTarget(
@@ -149,6 +150,10 @@ internal class NectoAndroidControlRuntime(private val activity: () -> Activity?)
 
     suspend fun perform(operation: String, input: NectoJsonValue): NectoJsonValue = onMain {
         if (performing) throw unavailable("Another action is in progress")
+        val decor = activity()?.window?.decorView
+        if (decor != null && decor.isAttachedToWindow && !decor.hasWindowFocus()) {
+            throw unavailable("A dialog or another window is in front. Close it before acting.")
+        }
         val root = rootView()
         val id = input["targetID"]?.stringValue
         val target = id?.let { targets[it] }
@@ -169,7 +174,11 @@ internal class NectoAndroidControlRuntime(private val activity: () -> Activity?)
         }
         val center = NectoPoint(current.midX, current.midY)
         val position = NectoControlGeometry.position(input["position"], current)
-        if (!isHit(root, view, position ?: center)) {
+        // A Compose element can be covered inside its own host, which the View check cannot see.
+        val composeID = target.composeID
+        fun reaches(point: NectoPoint) =
+            isHit(root, view, point) && (composeID == null || NectoComposeSemantics.isHit(view, composeID, point))
+        if (!reaches(position ?: center)) {
             throw unavailable("The target is covered by another view. Refresh Control before acting.")
         }
 
@@ -187,7 +196,7 @@ internal class NectoAndroidControlRuntime(private val activity: () -> Activity?)
                     }
                     // Spread contacts inside the visible target and verify every one before sending any.
                     val points = NectoControlGeometry.tapPoints(position ?: center, fingers.toInt(), current)
-                    if (!points.all { isHit(root, view, it) }) {
+                    if (!points.all(::reaches)) {
                         throw unavailable("The target is covered by another view. Refresh Control before acting.")
                     }
                     repeat(taps.toInt()) { index ->
@@ -218,7 +227,7 @@ internal class NectoAndroidControlRuntime(private val activity: () -> Activity?)
                             else -> throw NectoBridgeError(NectoBridgeErrorCode.INVALID_INPUT, "Choose up, down, left, or right")
                         }
                     }
-                    if (!isHit(root, view, start)) {
+                    if (!reaches(start)) {
                         throw unavailable("The target is covered by another view. Refresh Control before acting.")
                     }
                     drag(window, start, end, milliseconds.toLong())
@@ -287,7 +296,12 @@ internal class NectoAndroidControlRuntime(private val activity: () -> Activity?)
 
     // MARK: Discovery
 
-    private fun rootView(): View? = activity()?.window?.decorView?.takeIf { it.isAttachedToWindow }
+    /**
+     * The activity's window, while it has input focus. A dialog or popup that takes focus
+     * leaves the activity attached behind it, and acting there would reach what the
+     * person cannot see; the keyboard does not take focus.
+     */
+    private fun rootView(): View? = activity()?.window?.decorView?.takeIf { it.isAttachedToWindow && it.hasWindowFocus() }
 
     /** Every visible view with its visible frame, in drawing order. */
     private fun entries(root: View): List<Pair<View, NectoRect>> {
