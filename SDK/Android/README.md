@@ -118,7 +118,11 @@ One session is served at a time.
   - Back is the system BACK key (`method: "backKey"`).
   - Overlays that take no touches, such as edge-to-edge's `ProtectionLayout`, do not
     count as covering what is below.
-  - Dialogs and popups live in other windows and are not reached yet.
+  - Dialogs and popups live in other windows and are not reached yet. While one holds
+    input focus, Control offers no targets and refuses actions.
+  - Inside a Compose host, an element covers what is below it when it has touch
+    semantics (click, scroll or text input). A bare `pointerInput` and `zIndex` are not
+    seen.
 - **Panels** are packaged as Java resources: `necto/panels/<id>`, with a `files.txt`
   index.
   - The build generates them from the built iOS panels in
