@@ -17,6 +17,7 @@ import java.nio.ByteBuffer
 import java.nio.charset.CharacterCodingException
 import java.nio.file.FileVisitResult
 import java.nio.file.Files
+import java.nio.file.LinkOption
 import java.nio.file.Path
 import java.nio.file.SimpleFileVisitor
 import java.nio.file.attribute.BasicFileAttributes
@@ -127,9 +128,11 @@ public class NectoFilesPlugin(private val roots: List<Root>) : NectoPlugin {
         }
 
         necto.handle("files.delete") { input ->
-            val target = resolve(input, requirePath = true)
+            val target = resolveEntry(input)
             if (roots.any { it.directory.canonicalFile == target }) throw invalid("A root cannot be deleted")
-            if (!target.exists()) throw NectoBridgeError(NectoBridgeErrorCode.OPERATION_UNAVAILABLE, "'${target.name}' does not exist")
+            if (!Files.exists(target.toPath(), LinkOption.NOFOLLOW_LINKS)) {
+                throw NectoBridgeError(NectoBridgeErrorCode.OPERATION_UNAVAILABLE, "'${target.name}' does not exist")
+            }
             deleteWithoutFollowingLinks(target.toPath())
             jsonObject("removed" to jsonOf(true))
         }
@@ -172,6 +175,21 @@ public class NectoFilesPlugin(private val roots: List<Root>) : NectoPlugin {
         }
         return resolved
     }
+
+    /**
+     * Like [resolve], but the last part of the path is the entry itself: a symlink there
+     * is the link, not what it points to. Its folder must still be inside the root.
+     */
+    private fun resolveEntry(input: NectoJsonValue): File {
+        val path = (input["path"]?.stringValue ?: "").trimEnd('/')
+        val name = path.substringAfterLast('/')
+        if (name.isEmpty() || name == "." || name == "..") return resolve(input, requirePath = true)
+        val folder = resolve(input.withPath(path.substringBeforeLast('/', "")))
+        return File(folder, name)
+    }
+
+    private fun NectoJsonValue.withPath(path: String): NectoJsonValue =
+        jsonObject("root" to (this["root"] ?: NectoJsonValue.Null), "path" to jsonOf(path))
 
     private fun invalid(message: String) = NectoBridgeError(NectoBridgeErrorCode.INVALID_INPUT, message)
 

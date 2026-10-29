@@ -24,6 +24,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import java.io.File
 import java.nio.file.Files
+import java.nio.file.LinkOption
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -98,6 +99,27 @@ class PluginTests {
         files.call("files.delete", input("root" to "files", "path" to "cache"))
 
         assertFalse(folder.exists())
+        assertEquals("outside the root", File(outside, "keep.txt").readText())
+        outside.deleteRecursively()
+        Unit
+    }
+
+    /** Deleting a link removes the link; the folder it points to stays. */
+    @Test
+    fun deletingALinkRemovesOnlyTheLink() = runBlocking {
+        val target = File(directory, "keep").apply { mkdirs() }
+        File(target, "target.txt").writeText("kept")
+        val outside = Files.createTempDirectory("necto-outside").toFile()
+        File(outside, "keep.txt").writeText("outside the root")
+        Files.createSymbolicLink(File(directory, "alias").toPath(), target.toPath())
+        Files.createSymbolicLink(File(directory, "escape").toPath(), outside.toPath())
+
+        files.call("files.delete", input("root" to "files", "path" to "alias"))
+        files.call("files.delete", input("root" to "files", "path" to "escape"))
+
+        assertFalse(Files.exists(File(directory, "alias").toPath(), LinkOption.NOFOLLOW_LINKS))
+        assertFalse(Files.exists(File(directory, "escape").toPath(), LinkOption.NOFOLLOW_LINKS))
+        assertEquals("kept", File(target, "target.txt").readText())
         assertEquals("outside the root", File(outside, "keep.txt").readText())
         outside.deleteRecursively()
         Unit
