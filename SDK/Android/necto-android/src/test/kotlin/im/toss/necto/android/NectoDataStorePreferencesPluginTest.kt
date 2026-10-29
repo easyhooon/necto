@@ -80,12 +80,14 @@ class NectoDataStorePreferencesPluginTest {
     @Test
     fun aStringSetSavedUnchangedKeepsItsStrings() {
         val key = stringSetPreferencesKey("tags")
-        val stored = setOf("1", "1.0", "true", "null", "plain")
+        val stored = setOf("1", "1.0", "true", "null", "plain", "x", "\"x\"", "{\"id\":1}", "[1,2]")
         val preferences = mutablePreferencesOf(key to stored)
         val sent = NectoJsonValue.Array(
             listOf(
                 NectoJsonValue.Number(1.0), NectoJsonValue.Number(1.0), NectoJsonValue.Bool(true),
-                NectoJsonValue.Null, NectoJsonValue.Str("plain"),
+                NectoJsonValue.Null, NectoJsonValue.Str("plain"), NectoJsonValue.Str("x"), NectoJsonValue.Str("x"),
+                NectoJsonValue.Object(mapOf("id" to NectoJsonValue.Number(1.0))),
+                NectoJsonValue.Array(listOf(NectoJsonValue.Number(1.0), NectoJsonValue.Number(2.0))),
             ),
         )
 
@@ -94,6 +96,9 @@ class NectoDataStorePreferencesPluginTest {
 
         plugin.write(preferences, "tags", NectoJsonValue.Array(listOf(NectoJsonValue.Number(42.0))), "Array", stored)
         assertEquals(setOf("42"), preferences[key])
+        assertInvalid {
+            plugin.write(preferences, "tags", NectoJsonValue.Array(listOf(NectoJsonValue.Object(emptyMap()))), "Array", setOf("42"))
+        }
     }
 
     private fun assertInvalid(block: () -> Unit) {

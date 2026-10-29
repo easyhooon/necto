@@ -164,19 +164,24 @@ public class NectoDataStorePreferencesPlugin(
 
         /**
          * Set elements as the strings DataStore stores. The panel's Array editor sends each
-         * row as what it parses to, so an unchanged `"1"` or `"true"` arrives as a number or
-         * a Bool. Such an element becomes the existing string it came from, each one used
-         * once; one that is new becomes its JSON text.
+         * row as what it parses to, so an unchanged `"1"` arrives as a number, `"{\"a\":1}"`
+         * as an object and `"\"x\""` as the string `x`. An element first claims an existing
+         * string with the same text, then one that parses to it, each used once. One that
+         * matches none is new: a string as it is, a number or a Bool as its JSON text.
          */
         private fun strings(values: List<NectoJsonValue>, existing: Any?): Set<String> {
             val unclaimed = (existing as? Set<*>).orEmpty().filterIsInstance<String>().toMutableList()
-            return values.map { value ->
-                value.stringValue?.let { return@map it }
-                if (value is NectoJsonValue.Object || value is NectoJsonValue.Array) {
-                    throw invalid("DataStore stores sets of strings only")
-                }
-                val original = unclaimed.firstOrNull { text -> runCatching { NectoJsonValue.parse(text) }.getOrNull() == value }
-                original?.also { unclaimed.remove(it) } ?: value.toJson()
+            fun claim(match: (String) -> Boolean): String? = unclaimed.firstOrNull(match)?.also { unclaimed.remove(it) }
+            val exact = values.map { value -> value.stringValue?.let { text -> claim { it == text } } }
+            return values.mapIndexed { index, value ->
+                exact[index]
+                    ?: claim { text -> runCatching { NectoJsonValue.parse(text) }.getOrNull() == value }
+                    ?: value.stringValue
+                    ?: if (value is NectoJsonValue.Object || value is NectoJsonValue.Array) {
+                        throw invalid("DataStore stores sets of strings only")
+                    } else {
+                        value.toJson()
+                    }
             }.toSet()
         }
 
