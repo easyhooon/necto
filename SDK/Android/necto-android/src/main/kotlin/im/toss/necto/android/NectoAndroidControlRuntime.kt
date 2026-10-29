@@ -150,10 +150,7 @@ internal class NectoAndroidControlRuntime(private val activity: () -> Activity?)
 
     suspend fun perform(operation: String, input: NectoJsonValue): NectoJsonValue = onMain {
         if (performing) throw unavailable("Another action is in progress")
-        val decor = activity()?.window?.decorView
-        if (decor != null && decor.isAttachedToWindow && !decor.hasWindowFocus()) {
-            throw unavailable("A dialog or another window is in front. Close it before acting.")
-        }
+        requireFocus()
         val root = rootView()
         val id = input["targetID"]?.stringValue
         val target = id?.let { targets[it] }
@@ -200,7 +197,11 @@ internal class NectoAndroidControlRuntime(private val activity: () -> Activity?)
                         throw unavailable("The target is covered by another view. Refresh Control before acting.")
                     }
                     repeat(taps.toInt()) { index ->
-                        if (index > 0) delay(TAP_GAP_MS)
+                        if (index > 0) {
+                            delay(TAP_GAP_MS)
+                            // The tap before may have opened a dialog.
+                            requireFocus()
+                        }
                         tap(window, points)
                     }
                     "touch"
@@ -251,6 +252,7 @@ internal class NectoAndroidControlRuntime(private val activity: () -> Activity?)
                         // A tap focuses the field and brings up the keyboard, as a person would.
                         tap(window, listOf(center))
                         delay(FOCUS_DELAY_MS)
+                        requireFocus()
                         val id = target.composeID ?: throw unavailable("The target changed. Refresh Control before acting.")
                         if (!NectoComposeSemantics.setText(view, id, text, append = mode == "append")) {
                             throw unavailable("The text field did not accept the text. Refresh Control before acting.")
@@ -267,6 +269,7 @@ internal class NectoAndroidControlRuntime(private val activity: () -> Activity?)
                     }
                     tap(window, listOf(center))
                     delay(FOCUS_DELAY_MS)
+                    requireFocus()
                     if (!editor.hasFocus()) editor.requestFocus()
                     if (!editor.hasFocus() || editor.rootView !== root) {
                         throw unavailable("The text field did not receive focus. Refresh Control before acting.")
@@ -282,6 +285,14 @@ internal class NectoAndroidControlRuntime(private val activity: () -> Activity?)
             finish(root, before, method)
         } finally {
             performing = false
+        }
+    }
+
+    /** Refuses while a dialog or popup holds input focus in front of the activity. */
+    private fun requireFocus() {
+        val decor = activity()?.window?.decorView
+        if (decor != null && decor.isAttachedToWindow && !decor.hasWindowFocus()) {
+            throw unavailable("Another window, such as a dialog, has input focus. Close it before acting.")
         }
     }
 

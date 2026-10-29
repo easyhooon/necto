@@ -313,6 +313,27 @@ class NectoAndroidControlRuntimeTest {
         assertEquals(0, taps)
     }
 
+    /** A tap that opens a dialog stops a double tap before its second tap lands behind it. */
+    @Test
+    fun aDialogOpenedByTheFirstTapStopsTheSecond() = runTest {
+        var taps = 0
+        // On release, as a click would once the looper runs it.
+        show(Button(start()).apply {
+            text = "Confirm"
+            setOnTouchListener { _, event ->
+                if (event.actionMasked == MotionEvent.ACTION_UP) {
+                    taps++
+                    controller!!.windowFocusChanged(false)
+                }
+                false
+            }
+        })
+        val confirm = runtime.snapshot().single { it.label == "Confirm" }
+
+        assertUnavailable { runtime.perform("tap", jsonObject("targetID" to jsonOf(confirm.id), "tapCount" to jsonOf(2))) }
+        assertEquals(1, taps)
+    }
+
     // MARK: Helpers
 
     private fun start(): ComponentActivity =
