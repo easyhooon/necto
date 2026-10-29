@@ -55,7 +55,12 @@ public data class NectoNetworkRecord(
                     byteCount = byteCount,
                     isTruncated = byteCount > CAPTURE_LIMIT,
                     contentType = contentType,
-                    text = if (looksTextual(contentType)) decodeUtf8(capped) else null,
+                    // A cut can split a character; the text before it is kept.
+                    text = if (looksTextual(contentType)) {
+                        NectoFilesPlugin.decodeUtf8Head(capped, isComplete = capped.size.toLong() >= byteCount)
+                    } else {
+                        null
+                    },
                 )
             }
 
@@ -63,11 +68,6 @@ public data class NectoNetworkRecord(
                 val type = contentType?.lowercase() ?: return true
                 return listOf("json", "text", "xml", "javascript", "x-www-form-urlencoded").any { it in type }
             }
-
-            /** Strict decoding: bytes that are not UTF-8 are binary, not mojibake. */
-            private fun decodeUtf8(bytes: ByteArray): String? = runCatching {
-                Charsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(bytes)).toString()
-            }.getOrNull()
         }
     }
 

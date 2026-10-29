@@ -146,6 +146,17 @@ class PluginTests {
         )
     }
 
+    /** A body cut inside a character keeps the text before the cut. */
+    @Test
+    fun aCutBodyKeepsItsTextPrefix() {
+        val limit = NectoNetworkRecord.Body.CAPTURE_LIMIT
+        val data = ("a".repeat(limit - 1) + "가나").toByteArray()
+        val body = NectoNetworkRecord.Body.of(data, "application/json")
+        assertTrue(body.isTruncated)
+        assertEquals("a".repeat(limit - 1), body.text)
+        assertEquals(null, NectoNetworkRecord.Body.of(byteArrayOf(0xC3.toByte()), "text/plain").text)
+    }
+
     @Test
     fun textPreviewSurvivesACutMultibyteCharacter() {
         val bytes = "가나".toByteArray()
