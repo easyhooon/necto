@@ -69,6 +69,11 @@ class App : Application() {
 }
 ```
 
+Add the interceptor after any interceptor that checks a request body's type, such as
+one that adds fields to a `FormBody`: the interceptor wraps the body to copy the bytes
+OkHttp sends, so interceptors after it see the wrapper. An interceptor before it that
+compresses the body is captured compressed.
+
 `necto-android` declares no permissions. Custom plugins take the same shape as on iOS:
 
 ```kotlin
@@ -119,7 +124,8 @@ One session is served at a time.
   - Overlays that take no touches, such as edge-to-edge's `ProtectionLayout`, do not
     count as covering what is below.
   - Dialogs and popups live in other windows and are not reached yet. While one holds
-    input focus, Control offers no targets and refuses actions.
+    input focus, Control offers no targets, refuses actions and reads no accessibility
+    items. A multi-tap or a text input stops when its first tap opens one.
   - Inside a Compose host, an element covers what is below it when it has touch
     semantics (click, scroll or text input). A bare `pointerInput` and `zIndex` are not
     seen.
