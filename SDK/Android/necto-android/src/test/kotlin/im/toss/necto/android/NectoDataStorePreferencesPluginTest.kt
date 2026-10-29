@@ -5,6 +5,7 @@ package im.toss.necto.android
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.mutablePreferencesOf
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import im.toss.necto.model.NectoBridgeError
 import im.toss.necto.model.NectoBridgeErrorCode
 import im.toss.necto.model.NectoJsonValue
@@ -73,6 +74,26 @@ class NectoDataStorePreferencesPluginTest {
 
         plugin.write(preferences, "count", NectoJsonValue.Number(2_147_483_647.0), "Int", 1)
         assertEquals(Int.MAX_VALUE, preferences[key])
+    }
+
+    /** The Array editor sends `"1"` back as 1; an unchanged set must save as it was. */
+    @Test
+    fun aStringSetSavedUnchangedKeepsItsStrings() {
+        val key = stringSetPreferencesKey("tags")
+        val stored = setOf("1", "1.0", "true", "null", "plain")
+        val preferences = mutablePreferencesOf(key to stored)
+        val sent = NectoJsonValue.Array(
+            listOf(
+                NectoJsonValue.Number(1.0), NectoJsonValue.Number(1.0), NectoJsonValue.Bool(true),
+                NectoJsonValue.Null, NectoJsonValue.Str("plain"),
+            ),
+        )
+
+        plugin.write(preferences, "tags", sent, "Array", stored)
+        assertEquals(stored, preferences[key])
+
+        plugin.write(preferences, "tags", NectoJsonValue.Array(listOf(NectoJsonValue.Number(42.0))), "Array", stored)
+        assertEquals(setOf("42"), preferences[key])
     }
 
     private fun assertInvalid(block: () -> Unit) {
