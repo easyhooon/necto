@@ -204,7 +204,9 @@ class NectoAndroidControlRuntimeTest {
 
         assertEquals(1, count)
         assertEquals(jsonOf("touch"), result["method"])
-        assertEquals("Count 1", runtime.readAccessibility().single { it.identifier == "increment" }.label)
+        suspend fun label() = runtime.readAccessibility().single { it.identifier == "increment" }.label
+        afterFrames { label() == "Count 1" }
+        assertEquals("Count 1", label())
     }
 
     @Test
@@ -232,6 +234,7 @@ class NectoAndroidControlRuntimeTest {
 
         perform("swipe", runtime.snapshot().single { it.identifier == "list" }, "direction" to jsonOf("up"))
 
+        afterFrames { !labels().contains("Row 0") }
         assertFalse(labels().contains("Row 0"))
     }
 
@@ -359,6 +362,18 @@ class NectoAndroidControlRuntimeTest {
         idle()
         assertNotNull(result["dispatched"])
         return result
+    }
+
+    /**
+     * Compose redraws on a frame, and Robolectric runs frames only as its clock moves, so a
+     * read straight after an action can see the old text. Moves the clock a frame at a time
+     * until [done], for at most a second.
+     */
+    private suspend fun afterFrames(done: suspend () -> Boolean) {
+        repeat(60) {
+            if (done()) return
+            shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(16))
+        }
     }
 
     /** Suspends rather than blocks: an action that wrongly goes ahead fails here instead of hanging. */
