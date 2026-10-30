@@ -131,17 +131,18 @@ public class NectoDataStorePreferencesPlugin(
         )
 
         /**
-         * Named for the editor the panel opens: it knows Bool, Int, Double and Array. A Long
-         * edits as an Int and a Float as a Double; [write] keeps the stored type. A Long a
-         * double would round is named for itself, which the panel leaves read-only rather
-         * than saving the rounded number back.
+         * Named for the editor the panel opens: it knows Bool, Int, Double and StringSet. A
+         * Long edits as an Int and a Float as a Double; [write] keeps the stored type. A Long
+         * a double would round is named for itself, which the panel leaves read-only rather
+         * than saving the rounded number back. A string set is a StringSet, whose editor
+         * sends each row as typed, not as the JSON it parses to.
          */
         internal fun typeName(value: Any?): String = when (value) {
             is Boolean -> "Bool"
             is Int -> "Int"
             is Long -> if (fitsJsonNumber(value)) "Int" else "Long"
             is Float, is Double -> "Double"
-            is Set<*> -> "Array"
+            is Set<*> -> "StringSet"
             is String -> "String"
             is ByteArray -> "Data"
             else -> value?.javaClass?.simpleName ?: "Null"
@@ -163,27 +164,18 @@ public class NectoDataStorePreferencesPlugin(
         }
 
         /**
-         * Set elements as the strings DataStore stores. The panel's Array editor sends each
-         * row as what it parses to, so an unchanged `"1"` arrives as a number, `"{\"a\":1}"`
-         * as an object and `"\"x\""` as the string `x`. An element first claims an existing
-         * string with the same text, then one that parses to it, each used once. One that
-         * matches none is new: a string as it is, a number or a Bool as its JSON text.
+         * Set elements as the strings DataStore stores. The panel's StringSet editor sends
+         * every row as a string, exactly as typed. A number or a Bool, which another caller
+         * may send, is stored as its JSON text.
          */
-        private fun strings(values: List<NectoJsonValue>, existing: Any?): Set<String> {
-            val unclaimed = (existing as? Set<*>).orEmpty().filterIsInstance<String>().toMutableList()
-            fun claim(match: (String) -> Boolean): String? = unclaimed.firstOrNull(match)?.also { unclaimed.remove(it) }
-            val exact = values.map { value -> value.stringValue?.let { text -> claim { it == text } } }
-            return values.mapIndexed { index, value ->
-                exact[index]
-                    ?: claim { text -> runCatching { NectoJsonValue.parse(text) }.getOrNull() == value }
-                    ?: value.stringValue
-                    ?: if (value is NectoJsonValue.Object || value is NectoJsonValue.Array) {
-                        throw invalid("DataStore stores sets of strings only")
-                    } else {
-                        value.toJson()
-                    }
-            }.toSet()
-        }
+        private fun strings(values: List<NectoJsonValue>): Set<String> = values.map { value ->
+            value.stringValue
+                ?: if (value is NectoJsonValue.Object || value is NectoJsonValue.Array) {
+                    throw invalid("DataStore stores sets of strings only")
+                } else {
+                    value.toJson()
+                }
+        }.toSet()
 
         /** Drops [name] whatever its type: keys compare by name alone. */
         internal fun removeNamed(preferences: MutablePreferences, name: String) {
@@ -230,7 +222,7 @@ public class NectoDataStorePreferencesPlugin(
                 }
                 is NectoJsonValue.Str -> preferences[stringPreferencesKey(key)] = value.value
                 is NectoJsonValue.Array -> {
-                    preferences[stringSetPreferencesKey(key)] = strings(value.values, existing)
+                    preferences[stringSetPreferencesKey(key)] = strings(value.values)
                 }
                 is NectoJsonValue.Object -> throw invalid("DataStore Preferences cannot store a dictionary")
                 NectoJsonValue.Null -> Unit

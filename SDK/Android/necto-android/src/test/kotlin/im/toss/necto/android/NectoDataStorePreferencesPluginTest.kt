@@ -76,28 +76,27 @@ class NectoDataStorePreferencesPluginTest {
         assertEquals(Int.MAX_VALUE, preferences[key])
     }
 
-    /** The Array editor sends `"1"` back as 1; an unchanged set must save as it was. */
+    /** The StringSet editor sends rows as typed, so no row is mistaken for another. */
     @Test
-    fun aStringSetSavedUnchangedKeepsItsStrings() {
+    fun aStringSetKeepsEveryRowAsTyped() {
         val key = stringSetPreferencesKey("tags")
-        val stored = setOf("1", "1.0", "true", "null", "plain", "x", "\"x\"", "{\"id\":1}", "[1,2]")
+        val stored = setOf("1", "true", "null", "x", "\"x\"", "{\"id\":1}", "[1,2]")
         val preferences = mutablePreferencesOf(key to stored)
-        val sent = NectoJsonValue.Array(
-            listOf(
-                NectoJsonValue.Number(1.0), NectoJsonValue.Number(1.0), NectoJsonValue.Bool(true),
-                NectoJsonValue.Null, NectoJsonValue.Str("plain"), NectoJsonValue.Str("x"), NectoJsonValue.Str("x"),
-                NectoJsonValue.Object(mapOf("id" to NectoJsonValue.Number(1.0))),
-                NectoJsonValue.Array(listOf(NectoJsonValue.Number(1.0), NectoJsonValue.Number(2.0))),
-            ),
-        )
+        assertEquals("StringSet", plugin.typeName(stored))
 
-        plugin.write(preferences, "tags", sent, "Array", stored)
+        fun save(vararg rows: String) =
+            plugin.write(preferences, "tags", NectoJsonValue.Array(rows.map { NectoJsonValue.Str(it) }), "StringSet", preferences[key])
+
+        save(*stored.toTypedArray())
         assertEquals(stored, preferences[key])
+        // Editing `1` to `1.0` saves `1.0`; deleting plain `x` keeps the quoted one.
+        save("1.0", "true", "null", "\"x\"", "{\"id\":1}", "[1,2]")
+        assertEquals(setOf("1.0", "true", "null", "\"x\"", "{\"id\":1}", "[1,2]"), preferences[key])
 
-        plugin.write(preferences, "tags", NectoJsonValue.Array(listOf(NectoJsonValue.Number(42.0))), "Array", stored)
+        plugin.write(preferences, "tags", NectoJsonValue.Array(listOf(NectoJsonValue.Number(42.0))), "StringSet", preferences[key])
         assertEquals(setOf("42"), preferences[key])
         assertInvalid {
-            plugin.write(preferences, "tags", NectoJsonValue.Array(listOf(NectoJsonValue.Object(emptyMap()))), "Array", setOf("42"))
+            plugin.write(preferences, "tags", NectoJsonValue.Array(listOf(NectoJsonValue.Object(emptyMap()))), "StringSet", setOf("42"))
         }
     }
 
