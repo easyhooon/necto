@@ -4,6 +4,7 @@ package im.toss.necto.android
 
 import android.app.Activity
 import android.os.Looper
+import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
@@ -299,6 +300,54 @@ class NectoAndroidControlRuntimeTest {
 
         perform("tap", wide, "position" to jsonObject("x" to jsonOf(0.1), "y" to jsonOf(0.5)))
         assertEquals(1, count)
+    }
+
+    /** A clickable parent is not tapped where a clickable child inside it takes the tap. */
+    @Test
+    fun composeParentsAreNotTappedThroughTheirClickableChildren() = runTest {
+        var parent by mutableIntStateOf(0)
+        var child by mutableIntStateOf(0)
+        fun ComponentActivity.row(childAlignment: Alignment) = compose {
+            Box(Modifier.fillMaxWidth().height(100.dp).testTag("parent").clickable { parent++ }) {
+                Box(Modifier.fillMaxHeight().fillMaxWidth(0.3f).align(childAlignment).testTag("child").clickable { child++ })
+            }
+        }
+        start().row(Alignment.CenterEnd)
+        val target = runtime.snapshot().single { it.identifier == "parent" }
+
+        assertUnavailable { runtime.perform("tap", jsonObject("targetID" to jsonOf(target.id), "position" to jsonObject("x" to jsonOf(0.9), "y" to jsonOf(0.5)))) }
+        assertEquals(0, child)
+
+        perform("tap", target, "position" to jsonObject("x" to jsonOf(0.1), "y" to jsonOf(0.5)))
+        assertEquals(1, parent)
+
+        start().row(Alignment.Center)
+        assertTrue(runtime.snapshot().none { it.identifier == "parent" })
+    }
+
+    @Test
+    fun viewParentsAreNotTappedThroughTheirClickableChildren() = runTest {
+        var rowTaps = 0
+        var innerTaps = 0
+        val inner = Button(start()).apply { text = "Inner"; setOnClickListener { innerTaps++ } }
+        show(
+            FrameLayout(inner.context).apply {
+                contentDescription = "Row"
+                setOnClickListener { rowTaps++ }
+                addView(inner, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END))
+            },
+        )
+        val row = runtime.snapshot().single { it.label == "Row" }
+
+        assertUnavailable { runtime.perform("tap", jsonObject("targetID" to jsonOf(row.id), "position" to jsonObject("x" to jsonOf(0.98), "y" to jsonOf(0.5)))) }
+        assertEquals(0, innerTaps)
+
+        perform("tap", row, "position" to jsonObject("x" to jsonOf(0.1), "y" to jsonOf(0.5)))
+        assertEquals(1, rowTaps)
+
+        inner.layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER)
+        idle()
+        assertTrue(runtime.snapshot().none { it.label == "Row" })
     }
 
     /** While a dialog or another window holds input focus, the activity behind it is not acted on. */

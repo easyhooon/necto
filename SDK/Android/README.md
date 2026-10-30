@@ -129,6 +129,9 @@ One session is served at a time.
   - Inside a Compose host, an element covers what is below it when it has touch
     semantics (click, scroll or text input). A bare `pointerInput` and `zIndex` are not
     seen.
+  - A tap reaches a clickable parent only where no child that takes taps covers it, in
+    Views and in Compose, since that child would run its own click instead. A swipe
+    still scrolls the list it starts in.
 - **Panels** are packaged as Java resources: `necto/panels/<id>`, with a `files.txt`
   index.
   - The build generates them from the built iOS panels in

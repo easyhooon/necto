@@ -50,12 +50,14 @@ internal object NectoComposeSemantics {
     fun find(host: View, id: Int): Node? = walk(host).firstOrNull { it.id == id }
 
     /**
-     * Whether a touch at [point], in window pixels, reaches the element [id] or one inside
-     * it: the last element drawn there that takes touches must be that one. An element
-     * that takes touches without semantics, such as a bare `pointerInput`, is not seen,
-     * and drawing order is the tree's, so a `zIndex` is not either.
+     * Whether a touch at [point], in window pixels, reaches the element [id]: the last
+     * element drawn there that takes touches must be that one or inside it. For a [tap],
+     * nothing between them may take taps itself, since the innermost one runs its click
+     * and its parent's never does; a swipe still scrolls the list it starts in. An
+     * element that takes touches without semantics, such as a bare `pointerInput`, is
+     * not seen, and drawing order is the tree's, so a `zIndex` is not either.
      */
-    fun isHit(host: View, id: Int, point: NectoPoint): Boolean {
+    fun isHit(host: View, id: Int, point: NectoPoint, tap: Boolean): Boolean {
         val root = root(host) ?: return false
         var top: SemanticsNode? = null
         fun visit(node: SemanticsNode) {
@@ -73,6 +75,7 @@ internal object NectoComposeSemantics {
         var node = top
         while (node != null) {
             if (node.id == id) return true
+            if (tap && takesTaps(node.config)) return false
             node = node.parent
         }
         return false
@@ -80,8 +83,11 @@ internal object NectoComposeSemantics {
 
     /** Disabled or not, an element with these consumes the touch. */
     private fun takesTouches(config: SemanticsConfiguration): Boolean =
+        takesTaps(config) || config.contains(SemanticsActions.ScrollBy)
+
+    private fun takesTaps(config: SemanticsConfiguration): Boolean =
         config.contains(SemanticsActions.OnClick) || config.contains(SemanticsActions.OnLongClick) ||
-            config.contains(SemanticsActions.ScrollBy) || config.contains(SemanticsActions.SetText)
+            config.contains(SemanticsActions.SetText)
 
     /**
      * Sets a text field's text through its SetText semantics action, which goes through

@@ -86,7 +86,7 @@ internal class NectoAndroidControlRuntime(private val activity: () -> Activity?)
     private fun viewTarget(root: View, view: View, frame: NectoRect): NectoControlTarget? {
         run {
             val actions = actions(view, root)
-            if (actions.isEmpty() || !isHit(root, view, NectoPoint(frame.midX, frame.midY))) return null
+            if (actions.isEmpty() || !isHit(root, view, NectoPoint(frame.midX, frame.midY), tap = "swipe" !in actions)) return null
             val id = identities.getOrPut(view) { UUID.randomUUID().toString().uppercase() }
             val label = label(view)
             targets[id] = Target(WeakReference(view), frame, label, actions)
@@ -116,7 +116,8 @@ internal class NectoAndroidControlRuntime(private val activity: () -> Activity?)
         return NectoComposeSemantics.targets(host).mapNotNull { node ->
             val frame = node.frame.intersection(hostFrame) ?: return@mapNotNull null
             val center = NectoPoint(frame.midX, frame.midY)
-            if (!isHit(root, host, center) || !NectoComposeSemantics.isHit(host, node.id, center)) return@mapNotNull null
+            val tap = "swipe" !in node.actions
+            if (!isHit(root, host, center) || !NectoComposeSemantics.isHit(host, node.id, center, tap)) return@mapNotNull null
             val id = ids.getOrPut(node.id) { UUID.randomUUID().toString().uppercase() }
             targets[id] = Target(WeakReference(host), frame, node.label, node.actions, node.id)
             NectoControlTarget(
@@ -173,8 +174,9 @@ internal class NectoAndroidControlRuntime(private val activity: () -> Activity?)
         val position = NectoControlGeometry.position(input["position"], current)
         // A Compose element can be covered inside its own host, which the View check cannot see.
         val composeID = target.composeID
+        val tap = operation != "swipe"
         fun reaches(point: NectoPoint) =
-            isHit(root, view, point) && (composeID == null || NectoComposeSemantics.isHit(view, composeID, point))
+            isHit(root, view, point, tap) && (composeID == null || NectoComposeSemantics.isHit(view, composeID, point, tap))
         if (!reaches(position ?: center)) {
             throw unavailable("The target is covered by another view. Refresh Control before acting.")
         }
@@ -464,11 +466,14 @@ internal class NectoAndroidControlRuntime(private val activity: () -> Activity?)
 
     /**
      * Whether a touch at [point] reaches [view]: the topmost view under the point that
-     * takes touches must be the view itself, inside it, or one of its ancestors.
+     * takes touches must be the view itself, inside it, or one of its ancestors. For a
+     * [tap], one inside it does not count, since that child takes the tap and the view
+     * never sees it; a swipe still scrolls the list it starts in, and the window's root
+     * is tapped wherever it is.
      */
-    private fun isHit(root: View, view: View, point: NectoPoint): Boolean {
+    private fun isHit(root: View, view: View, point: NectoPoint, tap: Boolean = false): Boolean {
         val hit = hitTest(root, root, point) ?: return false
-        return hit === view || hit.isDescendantOf(view) || view.isDescendantOf(hit)
+        return hit === view || (hit.isDescendantOf(view) && (!tap || view === root)) || view.isDescendantOf(hit)
     }
 
     /**
