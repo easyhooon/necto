@@ -32,6 +32,14 @@ Repeated over USB on a Samsung Galaxy S25+ (`SM-S936N`, Android 17, API 37):
 `script/test-android-sample` and `script/test-android-security` both pass, with the
 target appearing as `android:<serial>`.
 
+The Control fixture and a string set edit were then driven over the ADB socket through
+`necto-cli`, three runs on each of the emulator and the Galaxy S25+: on Compose and on
+Views, `poc.readonly` and `poc.trap` are not targets, two taps, the nav action, the
+switch row, a tap at a position that leaves the trap alone, opening detail and going
+back, and a swipe that scrolls `poc.scroll`. `example.interests` reads as `StringSet`,
+and rows `1.0`, `"x"`, `1`, `true`, `{"a":1}` and `한글` are stored as typed; removing
+`1` removes only that row.
+
 Necto finds the app through ADB itself. It connected 3.7 seconds after it started
 with the app already running, and 6.2 seconds after the app was restarted. On start,
 Necto removes forwards left by a run that was killed, and leaves those of another
@@ -41,8 +49,8 @@ Necto that is still running.
 
 The plugins were first checked on a Samsung Galaxy S25+ (Android 17, USB) and a
 production Jetpack Compose app, against Necto 0.2.0, before the SDK moved to the ADB
-socket. Plugin behaviour does not depend on the transport, but these have not been
-repeated over the new connection.
+socket. Plugin behaviour does not depend on the transport, but only Control and Preferences
+have been repeated over the new connection (above).
 
 | Plugin | Check |
 | --- | --- |
